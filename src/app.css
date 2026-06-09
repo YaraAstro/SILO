@@ -4,12 +4,89 @@
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+:root {
+  color-scheme: dark;
+}
+
+html {
+  background: #090d11;
+}
+
 body {
-  @apply bg-zinc-50 text-zinc-950 antialiased;
+  @apply bg-[#090d11] text-slate-100 antialiased;
+  min-width: 320px;
 }
 
 button,
 input,
 select {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: rgba(45, 212, 191, 0.35);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f141b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border: 2px solid #0f141b;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.bg-silo {
+  background:
+    radial-gradient(circle at 50% -20%, rgba(20, 184, 166, 0.1), transparent 34rem),
+    #090d11;
+}
+
+.silo-card {
+  @apply rounded-xl border border-slate-800 bg-slate-900/80 shadow-sm shadow-black/20;
+}
+
+.silo-button,
+.silo-button-secondary,
+.silo-icon-button {
+  @apply inline-flex min-h-10 items-center gap-2 rounded-lg text-sm font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-teal-300 disabled:opacity-55;
+}
+
+.silo-button {
+  @apply bg-teal-400 px-5 text-slate-950 hover:bg-teal-300;
+}
+
+.silo-button-secondary {
+  @apply border border-slate-700 bg-slate-800 px-4 text-slate-200 hover:bg-slate-700;
+}
+
+.silo-icon-button {
+  @apply min-h-10 w-10 justify-center border border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100;
+}
+
+.silo-input {
+  @apply min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-teal-400 focus:ring-2 focus:ring-teal-400/20;
+}
+
+.silo-input option {
+  color: #e2e8f0;
+  background: #0f172a;
 }
