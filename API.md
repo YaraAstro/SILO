@@ -5,7 +5,7 @@ Frontend code calls these commands through `src/lib/siloApi.ts`.
 ## Boot And State
 
 - `handshake()` returns app version, database status, focus state, and settings.
-- `get_app_state()` returns focus state, the current active app, today's tracked seconds, rule counts, and network speed placeholder.
+- `get_app_state()` returns focus state, the current active app, today's tracked seconds, rule counts, and live aggregate network speed.
 
 Events:
 
@@ -40,7 +40,7 @@ Events:
 - `get_network_speed()` returns `{ uploadBps, downloadBps }`.
 - `get_data_usage(range)` accepts `7d`, `30d`, or `90d`.
 
-Active-window monitoring and session writes are implemented for Windows. Network speed and data attribution currently expose stable command contracts; OS network sampling is a later implementation phase.
+Active-window monitoring and session writes are implemented for Windows. Live aggregate network speed is sampled from OS interface counters. Per-app and per-site data attribution currently exposes stable command contracts; detailed attribution is a later implementation phase.
 
 ## Settings And Backup
 

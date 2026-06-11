@@ -28,7 +28,7 @@ pub fn get_app_state(state: State<'_, AppState>) -> CommandResult<AppSnapshot> {
         active_app: state.active_app(),
         today_seconds: state.storage().today_seconds().map_err(to_command_error)?,
         rules_summary: state.storage().rules_summary().map_err(to_command_error)?,
-        network_speed: NetworkSpeed::default(),
+        network_speed: state.network_speed(),
     })
 }
 
@@ -92,8 +92,8 @@ pub fn get_usage_90d(state: State<'_, AppState>) -> CommandResult<crate::models:
 }
 
 #[tauri::command]
-pub fn get_network_speed() -> CommandResult<NetworkSpeed> {
-    Ok(NetworkSpeed::default())
+pub fn get_network_speed(state: State<'_, AppState>) -> CommandResult<NetworkSpeed> {
+    Ok(state.network_speed())
 }
 
 #[tauri::command]

@@ -1,8 +1,8 @@
-use crate::models::{ActiveApp, CompletedSession};
+use crate::models::{ActiveApp, CompletedSession, NetworkSpeed};
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::time::Instant;
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use sysinfo::{Networks, Pid, ProcessesToUpdate, System};
 
 pub struct Monitor {
     inner: Mutex<MonitorState>,
@@ -87,6 +87,66 @@ impl Monitor {
         inner.current = next.clone();
         (next, completed_session)
     }
+}
+
+pub struct NetworkMonitor {
+    inner: Mutex<NetworkMonitorState>,
+}
+
+struct NetworkMonitorState {
+    networks: Networks,
+    last_sample_at: Instant,
+    last_speed: NetworkSpeed,
+}
+
+impl NetworkMonitor {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(NetworkMonitorState {
+                networks: Networks::new_with_refreshed_list(),
+                last_sample_at: Instant::now(),
+                last_speed: NetworkSpeed::default(),
+            }),
+        }
+    }
+
+    pub fn sample_speed(&self) -> NetworkSpeed {
+        let mut inner = self.inner.lock();
+        let elapsed_seconds = inner.last_sample_at.elapsed().as_secs_f64();
+        if elapsed_seconds < 0.25 {
+            return inner.last_speed.clone();
+        }
+
+        inner.networks.refresh(true);
+
+        let download_bytes = inner
+            .networks
+            .iter()
+            .map(|(_, data)| data.received())
+            .sum::<u64>();
+        let upload_bytes = inner
+            .networks
+            .iter()
+            .map(|(_, data)| data.transmitted())
+            .sum::<u64>();
+
+        let speed = NetworkSpeed {
+            upload_bps: bytes_per_second(upload_bytes, elapsed_seconds),
+            download_bps: bytes_per_second(download_bytes, elapsed_seconds),
+        };
+
+        inner.last_sample_at = Instant::now();
+        inner.last_speed = speed.clone();
+        speed
+    }
+}
+
+fn bytes_per_second(bytes: u64, elapsed_seconds: f64) -> i64 {
+    if elapsed_seconds <= 0.0 || !elapsed_seconds.is_finite() {
+        return 0;
+    }
+
+    ((bytes as f64 / elapsed_seconds).round()).clamp(0.0, i64::MAX as f64) as i64
 }
 
 struct ActiveWindowSample {

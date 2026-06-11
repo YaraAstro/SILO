@@ -465,7 +465,7 @@
               </div>
             </div>
             <p class="mt-6 rounded-lg border border-slate-700 bg-slate-950/35 p-3 text-sm text-slate-500">
-              OS network sampling is not active yet, so speeds may remain at zero.
+              Live speed uses total OS interface counters. Per-app and per-site attribution is still pending.
             </p>
           </section>
         </div>

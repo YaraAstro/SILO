@@ -9,7 +9,7 @@ use api::{
     save_settings, start_focus_mode, stop_focus_mode, toggle_focus_mode,
 };
 use models::AppReadyEvent;
-use monitor::Monitor;
+use monitor::{Monitor, NetworkMonitor};
 use std::time::Duration;
 use storage::Storage;
 use tauri::{Emitter, Manager};
@@ -17,6 +17,7 @@ use tauri::{Emitter, Manager};
 pub struct AppState {
     storage: Storage,
     monitor: Monitor,
+    network_monitor: NetworkMonitor,
     focus_mode: parking_lot::Mutex<bool>,
 }
 
@@ -25,6 +26,7 @@ impl AppState {
         Ok(Self {
             storage: Storage::open_default()?,
             monitor: Monitor::new(),
+            network_monitor: NetworkMonitor::new(),
             focus_mode: parking_lot::Mutex::new(false),
         })
     }
@@ -39,6 +41,10 @@ impl AppState {
 
     fn active_app(&self) -> models::ActiveApp {
         self.sample_active_app_and_persist()
+    }
+
+    fn network_speed(&self) -> models::NetworkSpeed {
+        self.network_monitor.sample_speed()
     }
 
     fn sample_active_app_and_persist(&self) -> models::ActiveApp {
