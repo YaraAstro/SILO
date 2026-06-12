@@ -35,6 +35,7 @@ pub struct ActiveApp {
     pub elapsed_seconds: i64,
     pub pid: Option<u32>,
     pub sampled_at: i64,
+    pub site: Option<String>,
 }
 
 impl Default for ActiveApp {
@@ -45,6 +46,7 @@ impl Default for ActiveApp {
             elapsed_seconds: 0,
             pid: None,
             sampled_at: 0,
+            site: None,
         }
     }
 }

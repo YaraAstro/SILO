@@ -44,12 +44,15 @@ impl Monitor {
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| format!("pid:{}", sample.pid));
 
+                let site = extract_browser_site(&app, &sample.title);
+
                 ActiveApp {
                     app,
                     title: sample.title,
                     elapsed_seconds: 0,
                     pid: Some(sample.pid),
                     sampled_at: Utc::now().timestamp(),
+                    site,
                 }
             }
             None => ActiveApp {
@@ -58,6 +61,7 @@ impl Monitor {
                 elapsed_seconds: 0,
                 pid: None,
                 sampled_at: Utc::now().timestamp(),
+                site: None,
             },
         };
 
@@ -195,4 +199,89 @@ mod platform {
     pub fn active_window() -> Option<ActiveWindowSample> {
         None
     }
+}
+
+pub fn extract_browser_site(app_name: &str, window_title: &str) -> Option<String> {
+    let app_lower = app_name.to_lowercase();
+    let is_browser = app_lower.contains("chrome")
+        || app_lower.contains("firefox")
+        || app_lower.contains("msedge")
+        || app_lower.contains("brave")
+        || app_lower.contains("opera")
+        || app_lower.contains("iexplore")
+        || app_lower.contains("safari");
+
+    if !is_browser {
+        return None;
+    }
+
+    let mut title = window_title.trim().to_string();
+    let browser_suffixes = [
+        " - Google Chrome",
+        " - Microsoft Edge",
+        " - Mozilla Firefox",
+        " - Brave",
+        " - Opera",
+        " - Google Chrome (Incognito)",
+        " - Brave (Private)",
+    ];
+    for suffix in browser_suffixes {
+        if title.ends_with(suffix) {
+            title = title[..title.len() - suffix.len()].trim().to_string();
+            break;
+        }
+    }
+
+    let separators = [" - ", " | ", " · "];
+    let mut site_name = title.clone();
+    for sep in separators {
+        if let Some(last_part) = title.rsplit(sep).next() {
+            let trimmed = last_part.trim();
+            if !trimmed.is_empty() && trimmed.len() < 30 {
+                site_name = trimmed.to_string();
+                break;
+            }
+        }
+    }
+
+    let site_lower = site_name.to_lowercase();
+    let domain = if site_lower.contains("youtube") {
+        "youtube.com".to_string()
+    } else if site_lower.contains("github") {
+        "github.com".to_string()
+    } else if site_lower.contains("google search") || site_lower == "google" {
+        "google.com".to_string()
+    } else if site_lower.contains("gmail") {
+        "gmail.com".to_string()
+    } else if site_lower.contains("facebook") {
+        "facebook.com".to_string()
+    } else if site_lower.contains("twitter") || site_lower == "x" {
+        "x.com".to_string()
+    } else if site_lower.contains("reddit") {
+        "reddit.com".to_string()
+    } else if site_lower.contains("netflix") {
+        "netflix.com".to_string()
+    } else if site_lower.contains("linkedin") {
+        "linkedin.com".to_string()
+    } else if site_lower.contains("stackoverflow") {
+        "stackoverflow.com".to_string()
+    } else if site_lower.contains("wikipedia") {
+        "wikipedia.org".to_string()
+    } else if site_lower.contains("amazon") {
+        "amazon.com".to_string()
+    } else {
+        let cleaned: String = site_lower
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-')
+            .collect();
+        if cleaned.contains('.') {
+            cleaned
+        } else if !cleaned.is_empty() {
+            format!("{}.com", cleaned)
+        } else {
+            "unknown.com".to_string()
+        }
+    };
+
+    Some(domain)
 }

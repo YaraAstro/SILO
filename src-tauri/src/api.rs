@@ -161,6 +161,30 @@ pub fn mark_backup_complete(state: State<'_, AppState>) -> CommandResult<Setting
         .map_err(to_command_error)
 }
 
+#[tauri::command]
+pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<String>> {
+    let mut apps = std::collections::HashSet::new();
+
+    if let Ok(tracked) = state.storage().get_tracked_apps() {
+        for app in tracked {
+            apps.insert(app);
+        }
+    }
+
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    for process in sys.processes().values() {
+        let name = process.name().to_string_lossy().to_string();
+        if !name.trim().is_empty() {
+            apps.insert(name);
+        }
+    }
+
+    let mut sorted_apps: Vec<String> = apps.into_iter().collect();
+    sorted_apps.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(sorted_apps)
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FocusModePayload {

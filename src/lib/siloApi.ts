@@ -37,6 +37,7 @@ export type AppSnapshot = {
     elapsedSeconds: number;
     pid: number | null;
     sampledAt: number;
+    site?: string;
   };
   todaySeconds: number;
   rulesSummary: {
@@ -110,5 +111,6 @@ export const siloApi = {
   exportUsageData: (range: string) => invoke<ExportResult>("export_usage_data", { range }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
-  markBackupComplete: () => invoke<Settings>("mark_backup_complete")
+  markBackupComplete: () => invoke<Settings>("mark_backup_complete"),
+  getAvailableApps: () => invoke<string[]>("get_available_apps")
 };

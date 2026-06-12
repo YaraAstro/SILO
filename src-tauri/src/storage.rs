@@ -360,6 +360,79 @@ impl Storage {
         )?;
         Ok(())
     }
+
+    pub fn get_tracked_apps(&self) -> anyhow::Result<Vec<String>> {
+        let conn = self.connection.lock();
+        let mut statement = conn.prepare(
+            "SELECT DISTINCT app_name FROM sessions 
+             UNION 
+             SELECT DISTINCT app_name FROM app_data_usage 
+             ORDER BY app_name ASC"
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut apps = Vec::new();
+        for app in rows {
+            if let Ok(app) = app {
+                let trimmed = app.trim();
+                if !trimmed.is_empty() {
+                    apps.push(trimmed.to_string());
+                }
+            }
+        }
+        Ok(apps)
+    }
+
+    pub fn track_site_time(&self, domain: &str, seconds: i64) -> anyhow::Result<()> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let exists: Option<i64> = conn.query_row(
+            "SELECT id FROM site_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
+            params![domain, today],
+            |row| row.get(0),
+        ).optional()?;
+
+        match exists {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE site_usage SET seconds = seconds + ?1 WHERE id = ?2",
+                    params![seconds, id],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO site_usage (domain, date, seconds) VALUES (?1, ?2, ?3)",
+                    params![domain, today, seconds],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn today_site_seconds(&self, domain: &str) -> anyhow::Result<i64> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let seconds: Option<i64> = conn.query_row(
+            "SELECT seconds FROM site_usage WHERE domain = ?1 AND date = ?2",
+            params![domain, today],
+            |row| row.get(0),
+        ).optional()?;
+        Ok(seconds.unwrap_or(0))
+    }
+
+    pub fn today_app_seconds(&self, app_name: &str) -> anyhow::Result<i64> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let day_start = format!("{today}T00:00:00Z");
+        let day_end = format!("{today}T23:59:59Z");
+        let seconds: Option<i64> = conn.query_row(
+            "SELECT COALESCE(SUM(duration_seconds), 0)
+             FROM sessions
+             WHERE app_name = ?1 AND datetime(start_ts, 'unixepoch') BETWEEN datetime(?2) AND datetime(?3)",
+            params![app_name, day_start, day_end],
+            |row| row.get(0),
+        ).optional()?;
+        Ok(seconds.unwrap_or(0))
+    }
 }
 
 fn setting_value(conn: &Connection, key: &str) -> anyhow::Result<Option<String>> {

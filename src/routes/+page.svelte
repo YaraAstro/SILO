@@ -80,6 +80,10 @@
   let exporting = $state(false);
   let errorMessage = $state("");
   let exportPath = $state("");
+  let availableApps = $state<string[]>([]);
+  let showAppDropdown = $state(false);
+  let showViolationOverlay = $state(false);
+  let violationData = $state<{ target: string; ruleType: string; enforcement: string; limitSeconds: number } | null>(null);
 
   onMount(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -106,6 +110,16 @@
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
 
+    void listen<{ target: string; ruleType: string; enforcement: string; limitSeconds: number }>(
+      "rule_violated",
+      (event) => {
+        violationData = event.payload;
+        showViolationOverlay = true;
+      }
+    )
+      .then((unlisten) => unlisteners.push(unlisten))
+      .catch(() => undefined);
+
     return () => {
       window.clearInterval(timer);
       unlisteners.forEach((unlisten) => unlisten());
@@ -118,12 +132,26 @@
     try {
       boot = await siloApi.handshake();
       settings = boot.settings;
-      await Promise.all([loadSnapshot(), loadRules(), loadTodayUsage(), loadTimeline(), loadDataUsage(dataRange)]);
+      await Promise.all([loadSnapshot(), loadRules(), loadTodayUsage(), loadTimeline(), loadDataUsage(dataRange), loadAvailableApps()]);
     } catch (error) {
       errorMessage = toErrorMessage(error);
     } finally {
       loading = false;
     }
+  }
+
+  async function loadAvailableApps() {
+    try {
+      availableApps = await siloApi.getAvailableApps();
+    } catch (error) {
+      console.error("Failed to load available apps:", error);
+    }
+  }
+
+  function filteredAvailableApps() {
+    const query = ruleDraft.target.trim().toLowerCase();
+    if (!query) return availableApps;
+    return availableApps.filter((app) => app.toLowerCase().includes(query));
   }
 
   async function refreshLiveState() {
@@ -490,9 +518,26 @@
           </section>
 
           <section class="silo-card p-6">
-            <div class="flex items-center gap-3">
-              <IconBadge icon={ChartColumn} tone="teal" label="Usage" />
-              <h2 class="text-lg font-bold">Today's Usage</h2>
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <IconBadge icon={ChartColumn} tone="teal" label="Usage" />
+                <h2 class="text-lg font-bold">Today's Usage</h2>
+              </div>
+              <button
+                class="silo-icon-button p-1 text-slate-400 hover:text-teal-300 hover:bg-slate-800 transition rounded-lg"
+                type="button"
+                aria-label="Refresh usage"
+                onclick={async () => {
+                  errorMessage = "";
+                  try {
+                    await Promise.all([loadTodayUsage(), loadSnapshot()]);
+                  } catch (err) {
+                    errorMessage = toErrorMessage(err);
+                  }
+                }}
+              >
+                <RotateCcw size={15} />
+              </button>
             </div>
             <div class="mt-5 space-y-4">
               {#if usage?.apps.length}
@@ -535,13 +580,42 @@
 
         <section class="silo-card p-5">
           <div class="grid gap-4 lg:grid-cols-[1fr_170px_150px_110px]">
-            <label class="text-sm font-semibold text-slate-300">
+            <label class="text-sm font-semibold text-slate-300 relative">
               Target
-              <input
-                class="silo-input mt-2"
-                placeholder={ruleDraft.ruleType === "app" ? "chrome.exe" : "youtube.com"}
-                bind:value={ruleDraft.target}
-              />
+              {#if ruleDraft.ruleType === "app"}
+                <input
+                  class="silo-input mt-2"
+                  placeholder="chrome.exe"
+                  bind:value={ruleDraft.target}
+                  onfocus={() => {
+                    showAppDropdown = true;
+                    void loadAvailableApps();
+                  }}
+                  onblur={() => setTimeout(() => showAppDropdown = false, 200)}
+                />
+                {#if showAppDropdown && filteredAvailableApps().length}
+                  <div class="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-xl scrollbar-thin scrollbar-thumb-slate-700">
+                    {#each filteredAvailableApps() as app}
+                      <button
+                        type="button"
+                        class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors"
+                        onclick={() => {
+                          ruleDraft.target = app;
+                          showAppDropdown = false;
+                        }}
+                      >
+                        {app}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              {:else}
+                <input
+                  class="silo-input mt-2"
+                  placeholder="youtube.com"
+                  bind:value={ruleDraft.target}
+                />
+              {/if}
             </label>
             <label class="text-sm font-semibold text-slate-300">
               Type
@@ -882,6 +956,40 @@
   </div>
 
   <BottomNav items={navItems} active={activeView} onSelect={(key) => (activeView = key as ViewKey)} />
+
+  {#if showViolationOverlay && violationData}
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md">
+      <div class="silo-card max-w-md w-full p-8 border border-red-500/30 bg-slate-900/90 shadow-2xl text-center space-y-6 animate-in fade-in zoom-in-95 duration-200">
+        <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 text-red-400">
+          <CircleAlert size={32} />
+        </div>
+        <div class="space-y-2">
+          <h2 class="text-2xl font-black text-slate-100">Focus Limit Reached</h2>
+          <p class="text-sm text-slate-400">
+            You've set a rule restricting access to this {violationData.ruleType}.
+          </p>
+        </div>
+        <div class="rounded-lg bg-slate-950/50 p-4 border border-slate-800 font-mono">
+          <span class="text-red-300 font-bold">{violationData.target}</span>
+          <div class="text-xs text-slate-500 mt-1">
+            Limit: {formatDuration(violationData.limitSeconds)}
+          </div>
+        </div>
+        <div class="flex justify-center gap-3">
+          <button
+            class="silo-button bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-lg transition"
+            type="button"
+            onclick={() => {
+              showViolationOverlay = false;
+              violationData = null;
+            }}
+          >
+            Acknowledge
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </main>
 
 {#snippet ConsumerList(title: string, rows: DataConsumer[], icon: any)}
