@@ -280,6 +280,7 @@ impl Storage {
 
     pub fn data_usage(&self, range: &str) -> anyhow::Result<DataUsageReport> {
         let days = match range {
+            "today" => 1,
             "7d" => 7,
             "30d" => 30,
             "90d" => 90,

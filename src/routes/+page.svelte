@@ -51,10 +51,17 @@
     type Settings,
     type UsageReport,
     type UsageTimeline,
-    type UsageDayBytes
+    type UsageDayBytes,
   } from "$lib/siloApi";
 
-  type ViewKey = "dashboard" | "rules" | "stats" | "network" | "settings";
+  type ViewKey =
+    | "dashboard"
+    | "rules"
+    | "stats"
+    | "network"
+    | "settings"
+    | "network-apps"
+    | "network-sites";
   type RangeKey = "7d" | "30d" | "90d";
 
   const navItems = [
@@ -62,7 +69,7 @@
     { key: "rules", label: "Rules", icon: Shield },
     { key: "stats", label: "Stats", icon: ChartColumn },
     { key: "network", label: "Network", icon: Wifi },
-    { key: "settings", label: "Settings", icon: SettingsIcon }
+    { key: "settings", label: "Settings", icon: SettingsIcon },
   ];
 
   let activeView = $state<ViewKey>("dashboard");
@@ -85,9 +92,71 @@
   let availableApps = $state<string[]>([]);
   let showAppDropdown = $state(false);
   let showViolationOverlay = $state(false);
-  let violationData = $state<{ target: string; ruleType: string; enforcement: string; limitSeconds: number } | null>(null);
+  let violationData = $state<{
+    target: string;
+    ruleType: string;
+    enforcement: string;
+    limitSeconds: number;
+  } | null>(null);
 
-  let liveNetworkSamples = $state<Array<{ time: string; down: number; up: number }>>([]);
+  let detailRange = $state<"today" | "7d" | "30d">("today");
+  let detailUsage = $state<DataUsageReport | null>(null);
+  let moreModalSearch = $state("");
+
+  let filteredMoreRows = $derived(
+    (activeView === "network-apps"
+      ? (detailUsage?.apps ?? [])
+      : (detailUsage?.sites ?? [])
+    ).filter((row) =>
+      row.name.toLowerCase().includes(moreModalSearch.toLowerCase()),
+    ),
+  );
+
+  async function loadDetailUsage(range: "today" | "7d" | "30d") {
+    try {
+      detailRange = range;
+      detailUsage = await siloApi.getDataUsage(range);
+    } catch (error) {
+      console.error("Failed to load detail network usage:", error);
+    }
+  }
+
+  async function openMoreScreen(title: string, rows: DataConsumer[]) {
+    moreModalSearch = "";
+    activeView = title === "Top Apps" ? "network-apps" : "network-sites";
+    await loadDetailUsage("today");
+  }
+
+  function getDetailTotalBytes() {
+    const list =
+      activeView === "network-apps"
+        ? (detailUsage?.apps ?? [])
+        : (detailUsage?.sites ?? []);
+    return list.reduce(
+      (sum, item) => sum + item.downloadBytes + item.uploadBytes,
+      0,
+    );
+  }
+
+  function getDetailDownloadBytes() {
+    const list =
+      activeView === "network-apps"
+        ? (detailUsage?.apps ?? [])
+        : (detailUsage?.sites ?? []);
+    return list.reduce((sum, item) => sum + item.downloadBytes, 0);
+  }
+
+  function getDetailUploadBytes() {
+    const list =
+      activeView === "network-apps"
+        ? (detailUsage?.apps ?? [])
+        : (detailUsage?.sites ?? []);
+    return list.reduce((sum, item) => sum + item.uploadBytes, 0);
+  }
+
+  let liveNetworkSamples = $state<
+    Array<{ time: string; down: number; up: number }>
+  >([]);
   let networkHistoryRange = $state<"7d" | "30d">("7d");
   let networkHistory = $state<UsageDayBytes[]>([]);
 
@@ -102,9 +171,15 @@
   function handleTouchEnd(e: TouchEvent) {
     const diffX = e.changedTouches[0].clientX - touchStartX;
     const diffY = e.changedTouches[0].clientY - touchStartY;
-    
+
     if (Math.abs(diffX) > 80 && Math.abs(diffY) < 50) {
-      const views: ViewKey[] = ["dashboard", "rules", "stats", "network", "settings"];
+      const views: ViewKey[] = [
+        "dashboard",
+        "rules",
+        "stats",
+        "network",
+        "settings",
+      ];
       const currentIndex = views.indexOf(activeView);
       if (diffX > 0) {
         if (currentIndex > 0) {
@@ -126,10 +201,16 @@
       if (now - lastSwipeTime < 800) {
         return;
       }
-      
-      const views: ViewKey[] = ["dashboard", "rules", "stats", "network", "settings"];
+
+      const views: ViewKey[] = [
+        "dashboard",
+        "rules",
+        "stats",
+        "network",
+        "settings",
+      ];
       const currentIndex = views.indexOf(activeView);
-      
+
       if (e.deltaX < 0) {
         if (currentIndex > 0) {
           activeView = views[currentIndex - 1];
@@ -152,7 +233,10 @@
 
   let toasts = $state<Toast[]>([]);
 
-  function showToast(message: string, type: "success" | "error" | "info" = "info") {
+  function showToast(
+    message: string,
+    type: "success" | "error" | "info" = "info",
+  ) {
     const id = Math.random().toString();
     toasts = [...toasts, { id, message, type }];
     setTimeout(() => {
@@ -185,27 +269,40 @@
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
 
-    void listen<{ app: string; todaySeconds: number }>("usage_update", (event) => {
-      if (snapshot) snapshot = { ...snapshot, todaySeconds: event.payload.todaySeconds };
-      void loadTodayUsage();
-    })
+    void listen<{ app: string; todaySeconds: number }>(
+      "usage_update",
+      (event) => {
+        if (snapshot)
+          snapshot = { ...snapshot, todaySeconds: event.payload.todaySeconds };
+        void loadTodayUsage();
+      },
+    )
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
 
     void listen<{ enabled: boolean }>("focus_mode_changed", (event) => {
-      if (snapshot) snapshot = { ...snapshot, focusMode: event.payload.enabled };
+      if (snapshot)
+        snapshot = { ...snapshot, focusMode: event.payload.enabled };
       if (boot) boot = { ...boot, focusMode: event.payload.enabled };
     })
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
 
-    void listen<{ target: string; ruleType: string; enforcement: string; limitSeconds: number }>(
-      "rule_violated",
-      (event) => {
-        violationData = event.payload;
-        showViolationOverlay = true;
-      }
-    )
+    void listen<{
+      target: string;
+      ruleType: string;
+      enforcement: string;
+      limitSeconds: number;
+    }>("rule_violated", (event) => {
+      violationData = event.payload;
+      showViolationOverlay = true;
+    })
+      .then((unlisten) => unlisteners.push(unlisten))
+      .catch(() => undefined);
+
+    void listen<string>("navigate", (event) => {
+      activeView = event.payload as ViewKey;
+    })
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
 
@@ -228,7 +325,7 @@
         loadTimeline(),
         loadDataUsage(dataRange),
         loadAvailableApps(),
-        loadNetworkHistory()
+        loadNetworkHistory(),
       ]);
     } catch (error) {
       errorMessage = toErrorMessage(error);
@@ -252,14 +349,25 @@
   }
 
   async function refreshLiveState() {
-    await Promise.all([loadSnapshot(), loadDataUsage(dataRange), loadNetworkHistory()]).catch((error) => {
+    await Promise.all([
+      loadSnapshot(),
+      loadDataUsage(dataRange),
+      loadNetworkHistory(),
+    ]).catch((error) => {
       errorMessage = toErrorMessage(error);
     });
 
-    const nowTime = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const nowTime = new Date().toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
     const downloadMb = (snapshot?.networkSpeed.downloadBps ?? 0) / 1_048_576;
     const uploadMb = (snapshot?.networkSpeed.uploadBps ?? 0) / 1_048_576;
-    liveNetworkSamples = [...liveNetworkSamples, { time: nowTime, down: downloadMb, up: uploadMb }].slice(-60);
+    liveNetworkSamples = [
+      ...liveNetworkSamples,
+      { time: nowTime, down: downloadMb, up: uploadMb },
+    ].slice(-60);
   }
 
   async function loadNetworkHistory() {
@@ -279,45 +387,47 @@
     return [
       {
         label: "Download (MB/s)",
-        data: liveNetworkSamples.map(s => s.down),
+        data: liveNetworkSamples.map((s) => s.down),
         backgroundColor: "rgba(20, 184, 166, 0.15)",
         borderColor: "#2dd4bf",
         borderWidth: 2,
         fill: true,
         tension: 0.3,
-        pointRadius: 0
+        pointRadius: 0,
       },
       {
         label: "Upload (MB/s)",
-        data: liveNetworkSamples.map(s => s.up),
+        data: liveNetworkSamples.map((s) => s.up),
         backgroundColor: "rgba(139, 92, 246, 0.15)",
         borderColor: "#a78bfa",
         borderWidth: 2,
         fill: true,
         tension: 0.3,
-        pointRadius: 0
-      }
+        pointRadius: 0,
+      },
     ];
   }
 
   function liveChartLabels() {
-    return liveNetworkSamples.map(s => s.time);
+    return liveNetworkSamples.map((s) => s.time);
   }
 
   function historyChartData() {
     return [
       {
         label: "Total Usage (MB)",
-        data: networkHistory.map(day => Math.round((day.downloadBytes + day.uploadBytes) / 1_048_576)),
+        data: networkHistory.map((day) =>
+          Math.round((day.downloadBytes + day.uploadBytes) / 1_048_576),
+        ),
         backgroundColor: "rgba(20, 184, 166, 0.85)",
         borderColor: "#2dd4bf",
-        borderRadius: 6
-      }
+        borderRadius: 6,
+      },
     ];
   }
 
   function historyChartLabels() {
-    return networkHistory.map(day => formatDateLabel(day.date));
+    return networkHistory.map((day) => formatDateLabel(day.date));
   }
 
   async function loadSnapshot() {
@@ -363,7 +473,8 @@
   }
 
   async function removeRule(rule: Rule) {
-    if (rule.id === null || !window.confirm(`Delete rule for ${rule.target}?`)) return;
+    if (rule.id === null || !window.confirm(`Delete rule for ${rule.target}?`))
+      return;
     try {
       await siloApi.deleteRule(rule.id);
       await Promise.all([loadRules(), loadSnapshot()]);
@@ -383,7 +494,10 @@
       const enabled = await siloApi.toggleFocusMode();
       if (snapshot) snapshot = { ...snapshot, focusMode: enabled };
       if (boot) boot = { ...boot, focusMode: enabled };
-      showToast(enabled ? "Focus Mode started!" : "Focus Mode stopped.", "info");
+      showToast(
+        enabled ? "Focus Mode started!" : "Focus Mode stopped.",
+        "info",
+      );
     } catch (error) {
       showToast(toErrorMessage(error), "error");
     }
@@ -455,12 +569,14 @@
     const hours = Math.floor(safeSeconds / 3600);
     const minutes = Math.floor((safeSeconds % 3600) / 60);
     const secs = Math.floor(safeSeconds % 60);
-    if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    if (hours > 0)
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
     return `${minutes}:${String(secs).padStart(2, "0")}`;
   }
 
   function formatBytes(bytes: number) {
-    if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+    if (bytes >= 1_073_741_824)
+      return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
     if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
     if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${bytes} B`;
@@ -471,7 +587,9 @@
   }
 
   function formatDateLabel(date: string) {
-    return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(new Date(`${date}T00:00:00`));
+    return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
+      new Date(`${date}T00:00:00`),
+    );
   }
 
   function toErrorMessage(error: unknown) {
@@ -481,7 +599,11 @@
   function filteredRules() {
     const query = ruleSearch.trim().toLowerCase();
     if (!query) return rules;
-    return rules.filter((rule) => rule.target.toLowerCase().includes(query) || rule.ruleType.includes(query));
+    return rules.filter(
+      (rule) =>
+        rule.target.toLowerCase().includes(query) ||
+        rule.ruleType.includes(query),
+    );
   }
 
   function weekDays() {
@@ -499,8 +621,8 @@
         data: weekDays().map((day) => Math.round(day.totalSeconds / 60)),
         backgroundColor: "rgba(20, 184, 166, 0.85)",
         borderColor: "#2dd4bf",
-        borderRadius: 6
-      }
+        borderRadius: 6,
+      },
     ];
   }
 
@@ -513,15 +635,15 @@
         data: [Math.round(appsTotal / 1_048_576)],
         backgroundColor: "rgba(20, 184, 166, 0.85)",
         borderColor: "#2dd4bf",
-        borderRadius: 6
+        borderRadius: 6,
       },
       {
         label: "Upload",
         data: [Math.round(uploadTotal / 1_048_576)],
         backgroundColor: "rgba(139, 92, 246, 0.85)",
         borderColor: "#a78bfa",
-        borderRadius: 6
-      }
+        borderRadius: 6,
+      },
     ];
   }
 
@@ -532,16 +654,23 @@
   function averageTrackedSeconds() {
     const days = timeline?.days.filter((day) => day.totalSeconds > 0) ?? [];
     if (!days.length) return 0;
-    return Math.round(days.reduce((sum, day) => sum + day.totalSeconds, 0) / days.length);
+    return Math.round(
+      days.reduce((sum, day) => sum + day.totalSeconds, 0) / days.length,
+    );
   }
 
   function bestTrackedDay() {
     const days = timeline?.days ?? [];
-    return days.reduce((best, day) => (day.totalSeconds > best.totalSeconds ? day : best), { date: "", totalSeconds: 0 });
+    return days.reduce(
+      (best, day) => (day.totalSeconds > best.totalSeconds ? day : best),
+      { date: "", totalSeconds: 0 },
+    );
   }
 
   function totalDataBytes() {
-    return (dataUsage?.totalDownloadBytes ?? 0) + (dataUsage?.totalUploadBytes ?? 0);
+    return (
+      (dataUsage?.totalDownloadBytes ?? 0) + (dataUsage?.totalUploadBytes ?? 0)
+    );
   }
 
   function consumerTotal(consumer: DataConsumer) {
@@ -553,10 +682,19 @@
   <title>SILO</title>
 </svelte:head>
 
-<main class="min-h-screen bg-silo text-slate-100" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onwheel={handleWheel}>
-  <div class="mx-auto min-h-screen w-full max-w-7xl px-4 pb-28 pt-8 sm:px-6 lg:px-8">
+<main
+  class="min-h-screen bg-silo text-slate-100"
+  ontouchstart={handleTouchStart}
+  ontouchend={handleTouchEnd}
+  onwheel={handleWheel}
+>
+  <div
+    class="mx-auto min-h-screen w-full max-w-7xl px-4 pb-28 pt-8 sm:px-6 lg:px-8"
+  >
     {#if errorMessage}
-      <div class="mb-5 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+      <div
+        class="mb-5 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+      >
         <CircleAlert class="mt-0.5 shrink-0 text-red-300" size={18} />
         <p>{errorMessage}</p>
       </div>
@@ -565,18 +703,24 @@
     {#if loading}
       <section class="flex min-h-[70vh] items-center justify-center">
         <div class="text-center">
-          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-400/15 text-teal-300">
+          <div
+            class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-400/15 text-teal-300"
+          >
             <Database size={26} />
           </div>
           <p class="mt-4 text-lg font-bold">Loading SILO workspace</p>
-          <p class="mt-1 text-sm text-slate-500">Connecting to local monitoring services.</p>
+          <p class="mt-1 text-sm text-slate-500">
+            Connecting to local monitoring services.
+          </p>
         </div>
       </section>
     {:else if activeView === "dashboard"}
       <section class="space-y-6">
         <header class="text-center">
           <h1 class="text-5xl font-black tracking-normal">
-            <span class="text-teal-300">SI</span><span class="text-blue-400">L</span><span class="text-violet-400">O</span>
+            <span class="text-teal-300">SI</span><span class="text-blue-400"
+              >L</span
+            ><span class="text-violet-400">O</span>
           </h1>
           <p class="mt-3 text-base text-slate-400">Your focus space</p>
           <button class="silo-button mt-7" type="button" onclick={toggleFocus}>
@@ -588,12 +732,22 @@
         <div class="grid gap-5 md:grid-cols-3">
           <section class="silo-card p-6">
             <div class="flex items-center gap-3">
-              <IconBadge icon={Monitor} tone="teal" label="Active application" />
+              <IconBadge
+                icon={Monitor}
+                tone="teal"
+                label="Active application"
+              />
               <h2 class="text-lg font-bold">Active Application</h2>
             </div>
-            <p class="mt-6 truncate text-2xl font-bold">{snapshot?.activeApp.app || "No active app"}</p>
-            <p class="mt-1 truncate text-sm text-slate-500">{snapshot?.activeApp.title || "Current window"}</p>
-            <p class="mt-5 flex items-center gap-2 font-mono text-lg font-bold text-teal-300">
+            <p class="mt-6 truncate text-2xl font-bold">
+              {snapshot?.activeApp.app || "No active app"}
+            </p>
+            <p class="mt-1 truncate text-sm text-slate-500">
+              {snapshot?.activeApp.title || "Current window"}
+            </p>
+            <p
+              class="mt-5 flex items-center gap-2 font-mono text-lg font-bold text-teal-300"
+            >
               <Clock size={18} />
               {formatClock(snapshot?.activeApp.elapsedSeconds ?? 0)}
             </p>
@@ -604,12 +758,21 @@
               <IconBadge icon={Timer} tone="purple" label="Session progress" />
               <h2 class="text-lg font-bold">Session Progress</h2>
             </div>
-            <p class="mt-6 text-3xl font-black">{formatDuration(snapshot?.todaySeconds ?? 0)}</p>
+            <p class="mt-6 text-3xl font-black">
+              {formatDuration(snapshot?.todaySeconds ?? 0)}
+            </p>
             <p class="mt-1 text-sm text-slate-500">Tracked today</p>
             <div class="mt-5 h-2 rounded-full bg-slate-800">
-              <div class="h-2 rounded-full bg-teal-400" style={`width: ${Math.min(100, ((snapshot?.todaySeconds ?? 0) / 28800) * 100)}%`}></div>
+              <div
+                class="h-2 rounded-full bg-teal-400"
+                style={`width: ${Math.min(100, ((snapshot?.todaySeconds ?? 0) / 28800) * 100)}%`}
+              ></div>
             </div>
-            <p class="mt-4 text-sm text-slate-400">{snapshot?.focusMode ? "Focus mode is running" : "Focus mode is stopped"}</p>
+            <p class="mt-4 text-sm text-slate-400">
+              {snapshot?.focusMode
+                ? "Focus mode is running"
+                : "Focus mode is stopped"}
+            </p>
           </section>
 
           <section class="silo-card p-6">
@@ -633,13 +796,19 @@
                 <IconBadge icon={Activity} tone="teal" label="Focus pattern" />
                 <div>
                   <h2 class="text-lg font-bold">Today's Focus Pattern</h2>
-                  <p class="text-sm text-slate-500">Screen-time trend from stored sessions</p>
+                  <p class="text-sm text-slate-500">
+                    Screen-time trend from stored sessions
+                  </p>
                 </div>
               </div>
             </div>
             {#if weekDays().length}
               <div class="mt-6">
-                <TrendChart labels={chartLabels()} datasets={focusChartData()} height={250} />
+                <TrendChart
+                  labels={chartLabels()}
+                  datasets={focusChartData()}
+                  height={250}
+                />
               </div>
             {:else}
               <EmptyState
@@ -663,16 +832,27 @@
             </div>
             <div class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
               <div>
-                <p class="flex items-center gap-2 text-sm text-slate-500"><Download size={15} /> Download</p>
-                <p class="mt-1 text-2xl font-black">{formatBps(snapshot?.networkSpeed.downloadBps ?? 0)}</p>
+                <p class="flex items-center gap-2 text-sm text-slate-500">
+                  <Download size={15} /> Download
+                </p>
+                <p class="mt-1 text-2xl font-black">
+                  {formatBps(snapshot?.networkSpeed.downloadBps ?? 0)}
+                </p>
               </div>
               <div>
-                <p class="flex items-center gap-2 text-sm text-slate-500"><Upload size={15} /> Upload</p>
-                <p class="mt-1 text-2xl font-black">{formatBps(snapshot?.networkSpeed.uploadBps ?? 0)}</p>
+                <p class="flex items-center gap-2 text-sm text-slate-500">
+                  <Upload size={15} /> Upload
+                </p>
+                <p class="mt-1 text-2xl font-black">
+                  {formatBps(snapshot?.networkSpeed.uploadBps ?? 0)}
+                </p>
               </div>
             </div>
-            <p class="mt-6 rounded-lg border border-slate-700 bg-slate-950/35 p-3 text-sm text-slate-500">
-              Live speed uses total OS interface counters. Per-app and per-site attribution is still pending.
+            <p
+              class="mt-6 rounded-lg border border-slate-700 bg-slate-950/35 p-3 text-sm text-slate-500"
+            >
+              Live speed uses total OS interface counters. Per-app and per-site
+              attribution is still pending.
             </p>
           </section>
         </div>
@@ -683,7 +863,9 @@
               <IconBadge icon={Sparkles} tone="purple" label="AI insights" />
               <div>
                 <h2 class="text-lg font-bold">AI Insights</h2>
-                <p class="text-sm text-slate-500">Personalized productivity tips</p>
+                <p class="text-sm text-slate-500">
+                  Personalized productivity tips
+                </p>
               </div>
             </div>
             <div class="mt-5 grid gap-3">
@@ -722,9 +904,13 @@
               {#if usage?.apps.length}
                 {#each usage.apps.slice(0, 6) as app}
                   <div>
-                    <div class="flex items-center justify-between gap-3 text-sm">
+                    <div
+                      class="flex items-center justify-between gap-3 text-sm"
+                    >
                       <span class="truncate font-semibold">{app.name}</span>
-                      <span class="shrink-0 text-slate-400">{formatDuration(app.seconds)}</span>
+                      <span class="shrink-0 text-slate-400"
+                        >{formatDuration(app.seconds)}</span
+                      >
                     </div>
                     <div class="mt-2 h-1.5 rounded-full bg-slate-800">
                       <div
@@ -735,10 +921,17 @@
                   </div>
                 {/each}
               {:else}
-                <EmptyState compact icon={Monitor} title="No usage yet" message="Tracked applications will appear here." />
+                <EmptyState
+                  compact
+                  icon={Monitor}
+                  title="No usage yet"
+                  message="Tracked applications will appear here."
+                />
               {/if}
             </div>
-            <div class="mt-6 border-t border-slate-800 pt-4 text-right text-xl font-black text-teal-300">
+            <div
+              class="mt-6 border-t border-slate-800 pt-4 text-right text-xl font-black text-teal-300"
+            >
               {formatDuration(usage?.totalSeconds ?? 0)}
             </div>
           </section>
@@ -746,12 +939,20 @@
       </section>
     {:else if activeView === "rules"}
       <section class="mx-auto max-w-5xl space-y-6">
-        <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <header
+          class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div>
             <h1 class="text-4xl font-black">Rules &amp; Limits</h1>
-            <p class="mt-2 text-slate-400">Manage your app and website restrictions</p>
+            <p class="mt-2 text-slate-400">
+              Manage your app and website restrictions
+            </p>
           </div>
-          <button class="silo-button" type="button" onclick={() => (ruleDraft = emptyRule())}>
+          <button
+            class="silo-button"
+            type="button"
+            onclick={() => (ruleDraft = emptyRule())}
+          >
             <Plus size={18} />
             Add Rule
           </button>
@@ -809,7 +1010,10 @@
             </label>
             <label class="text-sm font-semibold text-slate-300">
               Enforcement
-              <select class="silo-input mt-2" bind:value={ruleDraft.enforcement}>
+              <select
+                class="silo-input mt-2"
+                bind:value={ruleDraft.enforcement}
+              >
                 <option value="soft">Soft Warning</option>
                 <option value="hard">Hard Block</option>
                 <option value="warn">Warning</option>
@@ -822,54 +1026,123 @@
                 min="0"
                 type="number"
                 value={Math.round(ruleDraft.limitSeconds / 60)}
-                oninput={(event) => (ruleDraft.limitSeconds = Number((event.currentTarget as HTMLInputElement).value) * 60)}
+                oninput={(event) =>
+                  (ruleDraft.limitSeconds =
+                    Number((event.currentTarget as HTMLInputElement).value) *
+                    60)}
               />
             </label>
           </div>
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <label class="inline-flex items-center gap-3 text-sm font-semibold text-slate-300">
-              <input class="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-teal-400" type="checkbox" bind:checked={ruleDraft.active} />
+            <label
+              class="inline-flex items-center gap-3 text-sm font-semibold text-slate-300"
+            >
+              <input
+                class="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-teal-400"
+                type="checkbox"
+                bind:checked={ruleDraft.active}
+              />
               Active rule
             </label>
             <div class="flex gap-2">
-              <button class="silo-button-secondary" type="button" onclick={() => (ruleDraft = emptyRule())}>Clear</button>
-              <button class="silo-button" type="button" onclick={saveRule} disabled={savingRule}>
-                {savingRule ? "Saving" : ruleDraft.id ? "Save Rule" : "Add Rule"}
+              <button
+                class="silo-button-secondary"
+                type="button"
+                onclick={() => (ruleDraft = emptyRule())}>Clear</button
+              >
+              <button
+                class="silo-button"
+                type="button"
+                onclick={saveRule}
+                disabled={savingRule}
+              >
+                {savingRule
+                  ? "Saving"
+                  : ruleDraft.id
+                    ? "Save Rule"
+                    : "Add Rule"}
               </button>
             </div>
           </div>
         </section>
 
         <div class="relative max-w-md">
-          <Search class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={17} />
-          <input class="silo-input pl-10" placeholder="Filter rules..." bind:value={ruleSearch} />
+          <Search
+            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+            size={17}
+          />
+          <input
+            class="silo-input pl-10"
+            placeholder="Filter rules..."
+            bind:value={ruleSearch}
+          />
         </div>
 
         <section class="space-y-4">
           {#if filteredRules().length}
             {#each filteredRules() as rule}
               <article class="silo-card flex items-center gap-4 p-5">
-                <IconBadge icon={rule.ruleType === "site" ? Globe : Monitor} tone={rule.ruleType === "site" ? "teal" : "purple"} label={rule.ruleType} size="lg" />
+                <IconBadge
+                  icon={rule.ruleType === "site" ? Globe : Monitor}
+                  tone={rule.ruleType === "site" ? "teal" : "purple"}
+                  label={rule.ruleType}
+                  size="lg"
+                />
                 <div class="min-w-0 flex-1">
                   <h2 class="truncate text-xl font-bold">{rule.target}</h2>
-                  <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-                    <span class="flex items-center gap-1"><Clock size={14} /> {formatDuration(rule.limitSeconds)} daily</span>
-                    <span class="rounded-md px-2 py-1 text-xs font-semibold {rule.enforcement === 'hard' ? 'bg-red-500/15 text-red-300' : rule.enforcement === 'soft' ? 'bg-amber-500/15 text-amber-300' : 'bg-blue-500/15 text-blue-300'}">
-                      {rule.enforcement === "hard" ? "Hard Block" : rule.enforcement === "soft" ? "Soft Warning" : "Warning"}
+                  <div
+                    class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-400"
+                  >
+                    <span class="flex items-center gap-1"
+                      ><Clock size={14} />
+                      {formatDuration(rule.limitSeconds)} daily</span
+                    >
+                    <span
+                      class="rounded-md px-2 py-1 text-xs font-semibold {rule.enforcement ===
+                      'hard'
+                        ? 'bg-red-500/15 text-red-300'
+                        : rule.enforcement === 'soft'
+                          ? 'bg-amber-500/15 text-amber-300'
+                          : 'bg-blue-500/15 text-blue-300'}"
+                    >
+                      {rule.enforcement === "hard"
+                        ? "Hard Block"
+                        : rule.enforcement === "soft"
+                          ? "Soft Warning"
+                          : "Warning"}
                     </span>
-                    <span class={rule.active ? "text-emerald-300" : "text-slate-500"}>{rule.active ? "Active" : "Paused"}</span>
+                    <span
+                      class={rule.active
+                        ? "text-emerald-300"
+                        : "text-slate-500"}
+                      >{rule.active ? "Active" : "Paused"}</span
+                    >
                   </div>
                 </div>
-                <button class="silo-icon-button" type="button" aria-label={`Edit ${rule.target}`} onclick={() => editRule(rule)}>
+                <button
+                  class="silo-icon-button"
+                  type="button"
+                  aria-label={`Edit ${rule.target}`}
+                  onclick={() => editRule(rule)}
+                >
                   <Info size={18} />
                 </button>
-                <button class="silo-icon-button text-red-300 hover:bg-red-500/10" type="button" aria-label={`Delete ${rule.target}`} onclick={() => removeRule(rule)}>
+                <button
+                  class="silo-icon-button text-red-300 hover:bg-red-500/10"
+                  type="button"
+                  aria-label={`Delete ${rule.target}`}
+                  onclick={() => removeRule(rule)}
+                >
                   <Trash2 size={18} />
                 </button>
               </article>
             {/each}
           {:else}
-            <EmptyState icon={Shield} title="No rules found" message="Add an app or website rule to start managing distractions." />
+            <EmptyState
+              icon={Shield}
+              title="No rules found"
+              message="Add an app or website rule to start managing distractions."
+            />
           {/if}
         </section>
       </section>
@@ -881,11 +1154,46 @@
         </header>
 
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <MetricCard icon={Clock} title="Total Focus Time" value={formatDuration(totalTrackedSeconds())} trend={totalTrackedSeconds() ? "From stored history" : ""} />
-          <MetricCard icon={Target} tone="purple" title="Daily Average" value={formatDuration(averageTrackedSeconds())} trend={averageTrackedSeconds() ? "Active days only" : ""} />
-          <MetricCard icon={Flame} tone="yellow" title="Streak" value="Unavailable" caption="Needs focus-session goals" />
-          <MetricCard icon={Award} tone="yellow" title="Best Day" value={bestTrackedDay().date ? formatDateLabel(bestTrackedDay().date) : "None"} caption={bestTrackedDay().totalSeconds ? formatDuration(bestTrackedDay().totalSeconds) : "No history yet"} />
-          <MetricCard icon={Calendar} tone="blue" title="This Week" value={formatDuration(weekDays().reduce((sum, day) => sum + day.totalSeconds, 0))} trend={weekDays().length ? "Last 7 days" : ""} />
+          <MetricCard
+            icon={Clock}
+            title="Total Focus Time"
+            value={formatDuration(totalTrackedSeconds())}
+            trend={totalTrackedSeconds() ? "From stored history" : ""}
+          />
+          <MetricCard
+            icon={Target}
+            tone="purple"
+            title="Daily Average"
+            value={formatDuration(averageTrackedSeconds())}
+            trend={averageTrackedSeconds() ? "Active days only" : ""}
+          />
+          <MetricCard
+            icon={Flame}
+            tone="yellow"
+            title="Streak"
+            value="Unavailable"
+            caption="Needs focus-session goals"
+          />
+          <MetricCard
+            icon={Award}
+            tone="yellow"
+            title="Best Day"
+            value={bestTrackedDay().date
+              ? formatDateLabel(bestTrackedDay().date)
+              : "None"}
+            caption={bestTrackedDay().totalSeconds
+              ? formatDuration(bestTrackedDay().totalSeconds)
+              : "No history yet"}
+          />
+          <MetricCard
+            icon={Calendar}
+            tone="blue"
+            title="This Week"
+            value={formatDuration(
+              weekDays().reduce((sum, day) => sum + day.totalSeconds, 0),
+            )}
+            trend={weekDays().length ? "Last 7 days" : ""}
+          />
         </div>
 
         <section class="silo-card p-6">
@@ -911,26 +1219,43 @@
                 ></span>
               {/each}
             </div>
-            <div class="mt-5 flex max-w-xl items-center justify-between text-xs text-slate-500">
+            <div
+              class="mt-5 flex max-w-xl items-center justify-between text-xs text-slate-500"
+            >
               <span>Less</span>
               <span>More</span>
             </div>
           {:else}
-            <EmptyState icon={Calendar} title="No heatmap data" message="Daily activity dots will appear once sessions are recorded." />
+            <EmptyState
+              icon={Calendar}
+              title="No heatmap data"
+              message="Daily activity dots will appear once sessions are recorded."
+            />
           {/if}
         </section>
 
         <section class="silo-card p-6">
           <div class="flex items-center justify-between gap-4">
             <h2 class="text-lg font-bold">Time Analysis</h2>
-            <span class="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300">Week</span>
+            <span
+              class="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300"
+              >Week</span
+            >
           </div>
           {#if weekDays().length}
             <div class="mt-6">
-              <TrendChart labels={chartLabels()} datasets={focusChartData()} height={330} />
+              <TrendChart
+                labels={chartLabels()}
+                datasets={focusChartData()}
+                height={330}
+              />
             </div>
           {:else}
-            <EmptyState icon={ChartColumn} title="No time analysis yet" message="The weekly chart will populate from usage history." />
+            <EmptyState
+              icon={ChartColumn}
+              title="No time analysis yet"
+              message="The weekly chart will populate from usage history."
+            />
           {/if}
         </section>
 
@@ -942,30 +1267,49 @@
                 <div>
                   <div class="flex items-center justify-between gap-3">
                     <span class="truncate font-semibold">{app.name}</span>
-                    <span class="text-sm text-slate-400">{formatDuration(app.seconds)}</span>
+                    <span class="text-sm text-slate-400"
+                      >{formatDuration(app.seconds)}</span
+                    >
                   </div>
                   <div class="mt-2 h-2 rounded-full bg-slate-800">
-                    <div class="h-2 rounded-full bg-blue-400" style={`width: ${Math.max(4, Math.min(100, (app.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}></div>
+                    <div
+                      class="h-2 rounded-full bg-blue-400"
+                      style={`width: ${Math.max(4, Math.min(100, (app.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
+                    ></div>
                   </div>
                 </div>
               {/each}
             {:else}
-              <EmptyState compact icon={Monitor} title="No app usage today" message="Applications will appear after SILO tracks them." />
+              <EmptyState
+                compact
+                icon={Monitor}
+                title="No app usage today"
+                message="Applications will appear after SILO tracks them."
+              />
             {/if}
           </div>
         </section>
       </section>
     {:else if activeView === "network"}
       <section class="mx-auto max-w-6xl space-y-6">
-        <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <header
+          class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div>
             <div class="flex items-center gap-3">
               <Wifi class="text-teal-300" size={28} />
               <h1 class="text-4xl font-black">Network</h1>
             </div>
-            <p class="mt-2 text-slate-400">Live speed, per-app and per-site bandwidth usage</p>
+            <p class="mt-2 text-slate-400">
+              Live speed, per-app and per-site bandwidth usage
+            </p>
           </div>
-          <button class="silo-button-secondary" type="button" onclick={exportUsage} disabled={exporting}>
+          <button
+            class="silo-button-secondary"
+            type="button"
+            onclick={exportUsage}
+            disabled={exporting}
+          >
             <FileDown size={16} />
             Export Usage
           </button>
@@ -973,24 +1317,45 @@
 
         <section class="silo-card p-6">
           <div class="flex items-center justify-between text-sm text-slate-500">
-            <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-emerald-400"></span> Live network speed</span>
-            <span>Sample interval: {settings?.sampleIntervalSeconds ?? 5}s</span>
+            <span class="flex items-center gap-2"
+              ><span class="h-2 w-2 rounded-full bg-emerald-400"></span> Live network
+              speed</span
+            >
+            <span>Sample interval: {settings?.sampleIntervalSeconds ?? 5}s</span
+            >
           </div>
           <div class="mt-8 grid gap-8 md:grid-cols-2">
             <div>
-              <p class="flex items-center gap-2 text-sm text-slate-500"><Download size={16} /> Download</p>
-              <p class="mt-2 text-5xl font-black text-teal-300">{formatBps(snapshot?.networkSpeed.downloadBps ?? 0)}</p>
-              <p class="mt-2 text-sm text-slate-500">Today: {formatBytes(dataUsage?.totalDownloadBytes ?? 0)}</p>
+              <p class="flex items-center gap-2 text-sm text-slate-500">
+                <Download size={16} /> Download
+              </p>
+              <p class="mt-2 text-5xl font-black text-teal-300">
+                {formatBps(snapshot?.networkSpeed.downloadBps ?? 0)}
+              </p>
+              <p class="mt-2 text-sm text-slate-500">
+                Today: {formatBytes(dataUsage?.totalDownloadBytes ?? 0)}
+              </p>
             </div>
             <div>
-              <p class="flex items-center gap-2 text-sm text-slate-500"><Upload size={16} /> Upload</p>
-              <p class="mt-2 text-5xl font-black text-violet-400">{formatBps(snapshot?.networkSpeed.uploadBps ?? 0)}</p>
-              <p class="mt-2 text-sm text-slate-500">Today: {formatBytes(dataUsage?.totalUploadBytes ?? 0)}</p>
+              <p class="flex items-center gap-2 text-sm text-slate-500">
+                <Upload size={16} /> Upload
+              </p>
+              <p class="mt-2 text-5xl font-black text-violet-400">
+                {formatBps(snapshot?.networkSpeed.uploadBps ?? 0)}
+              </p>
+              <p class="mt-2 text-sm text-slate-500">
+                Today: {formatBytes(dataUsage?.totalUploadBytes ?? 0)}
+              </p>
             </div>
           </div>
           {#if liveNetworkSamples.length > 1}
             <div class="mt-8">
-              <TrendChart labels={liveChartLabels()} datasets={liveChartData()} type="line" height={200} />
+              <TrendChart
+                labels={liveChartLabels()}
+                datasets={liveChartData()}
+                type="line"
+                height={200}
+              />
             </div>
           {:else}
             <div class="mt-8 h-1 rounded-full bg-teal-400/70"></div>
@@ -998,15 +1363,23 @@
         </section>
 
         <section class="silo-card p-6">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div>
               <h2 class="text-lg font-bold">Usage breakdown</h2>
-              <p class="text-sm text-slate-500">See how much data each app and site used over the selected period</p>
+              <p class="text-sm text-slate-500">
+                See how much data each app and site used over the selected
+                period
+              </p>
             </div>
             <div class="flex rounded-lg bg-slate-800 p-1">
               {#each ["7d", "30d", "90d"] as range}
                 <button
-                  class="rounded-md px-3 py-2 text-xs font-bold transition {dataRange === range ? 'bg-slate-950 text-slate-100' : 'text-slate-400 hover:text-slate-100'}"
+                  class="rounded-md px-3 py-2 text-xs font-bold transition {dataRange ===
+                  range
+                    ? 'bg-slate-950 text-slate-100'
+                    : 'text-slate-400 hover:text-slate-100'}"
                   type="button"
                   onclick={() => loadDataUsage(range as RangeKey)}
                 >
@@ -1016,35 +1389,75 @@
             </div>
           </div>
           <div class="mt-6 grid gap-5 sm:grid-cols-4">
-            <div><p class="text-sm text-slate-500">Total</p><p class="mt-1 text-2xl font-black">{formatBytes(totalDataBytes())}</p></div>
-            <div><p class="text-sm text-slate-500">Download</p><p class="mt-1 text-2xl font-black">{formatBytes(dataUsage?.totalDownloadBytes ?? 0)}</p></div>
-            <div><p class="text-sm text-slate-500">Upload</p><p class="mt-1 text-2xl font-black">{formatBytes(dataUsage?.totalUploadBytes ?? 0)}</p></div>
-            <div><p class="text-sm text-slate-500">Range</p><p class="mt-1 text-2xl font-black">{dataRange}</p></div>
+            <div>
+              <p class="text-sm text-slate-500">Total</p>
+              <p class="mt-1 text-2xl font-black">
+                {formatBytes(totalDataBytes())}
+              </p>
+            </div>
+            <div>
+              <p class="text-sm text-slate-500">Download</p>
+              <p class="mt-1 text-2xl font-black">
+                {formatBytes(dataUsage?.totalDownloadBytes ?? 0)}
+              </p>
+            </div>
+            <div>
+              <p class="text-sm text-slate-500">Upload</p>
+              <p class="mt-1 text-2xl font-black">
+                {formatBytes(dataUsage?.totalUploadBytes ?? 0)}
+              </p>
+            </div>
+            <div>
+              <p class="text-sm text-slate-500">Range</p>
+              <p class="mt-1 text-2xl font-black">{dataRange}</p>
+            </div>
           </div>
           {#if totalDataBytes() > 0}
             <div class="mt-6">
-              <TrendChart labels={["Selected range"]} datasets={networkChartData()} height={220} />
+              <TrendChart
+                labels={["Selected range"]}
+                datasets={networkChartData()}
+                height={220}
+              />
             </div>
           {/if}
         </section>
 
         <div class="grid gap-5 lg:grid-cols-2">
-          {@render ConsumerList("Top Apps", dataUsage?.apps ?? [], Monitor)}
-          {@render ConsumerList("Top Sites", dataUsage?.sites ?? [], Globe)}
+          {@render ConsumerList(
+            "Top Apps",
+            dataUsage?.apps ?? [],
+            "Apps",
+            Monitor,
+          )}
+          {@render ConsumerList(
+            "Top Sites",
+            dataUsage?.sites ?? [],
+            "Websites",
+            Globe,
+          )}
         </div>
 
         <section class="silo-card p-6">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div>
               <h2 class="text-lg font-bold">Usage History</h2>
-              <p class="text-sm text-slate-500">Total data usage (upload + download) per day</p>
+              <p class="text-sm text-slate-500">
+                Total data usage (upload + download) per day
+              </p>
             </div>
             <div class="flex rounded-lg bg-slate-800 p-1">
               {#each ["7d", "30d"] as range}
                 <button
-                  class="rounded-md px-3 py-2 text-xs font-bold transition {networkHistoryRange === range ? 'bg-slate-950 text-slate-100' : 'text-slate-400 hover:text-slate-100'}"
+                  class="rounded-md px-3 py-2 text-xs font-bold transition {networkHistoryRange ===
+                  range
+                    ? 'bg-slate-950 text-slate-100'
+                    : 'text-slate-400 hover:text-slate-100'}"
                   type="button"
-                  onclick={() => changeNetworkHistoryRange(range as "7d" | "30d")}
+                  onclick={() =>
+                    changeNetworkHistoryRange(range as "7d" | "30d")}
                 >
                   {range === "7d" ? "Weekly" : "Monthly"}
                 </button>
@@ -1053,7 +1466,12 @@
           </div>
           {#if networkHistory.length}
             <div class="mt-6">
-              <TrendChart labels={historyChartLabels()} datasets={historyChartData()} type="bar" height={260} />
+              <TrendChart
+                labels={historyChartLabels()}
+                datasets={historyChartData()}
+                type="bar"
+                height={260}
+              />
             </div>
           {:else}
             <EmptyState
@@ -1062,6 +1480,458 @@
               message="Attributed daily network volume will appear here as SILO measures background traffic."
             />
           {/if}
+        </section>
+      </section>
+    {:else if activeView === "network-apps"}
+      <section
+        class="mx-auto max-w-5xl space-y-6"
+        transition:fade={{ duration: 150 }}
+      >
+        <!-- Header Nav Row -->
+        <header
+          class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
+        >
+          <div class="flex items-center gap-4">
+            <button
+              class="inline-flex items-center gap-2 text-slate-300 hover:text-slate-100 bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-semibold transition hover:scale-[1.02] active:scale-[0.98] border border-slate-700/50"
+              type="button"
+              onclick={() => (activeView = "network")}
+            >
+              ← Back
+            </button>
+            <div>
+              <h1 class="text-3xl font-black flex items-center gap-2">
+                <Monitor class="text-teal-350 shrink-0" size={24} />
+                All App Usages
+              </h1>
+              <p class="text-sm text-slate-505 mt-0.5">
+                Detailed metrics of local applications
+              </p>
+            </div>
+          </div>
+
+          <!-- Date Range Pills -->
+          <div
+            class="flex rounded-xl bg-slate-900/90 border border-slate-800 p-1 w-fit shadow-lg shadow-black/20 self-start md:self-auto"
+          >
+            {#each [{ key: "today", label: "Today" }, { key: "7d", label: "Last 7 Days" }, { key: "30d", label: "Last 30 Days" }] as range}
+              <button
+                class="rounded-lg px-4 py-2 text-xs font-bold transition-all duration-200 {detailRange ===
+                range.key
+                  ? 'bg-teal-400 text-slate-950 font-black shadow-md'
+                  : 'text-slate-400 hover:text-slate-100'}"
+                type="button"
+                onclick={() =>
+                  loadDetailUsage(range.key as "today" | "7d" | "30d")}
+              >
+                {range.label}
+              </button>
+            {/each}
+          </div>
+        </header>
+
+        <!-- Stats Overview Cards Grid -->
+        <div class="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-500 uppercase tracking-wider"
+              >Total Usage</span
+            >
+            <span class="text-2xl font-black text-slate-200 mt-2 block"
+              >{formatBytes(getDetailTotalBytes())}</span
+            >
+            <span class="text-xs text-slate-505 mt-1">Upload + Download</span>
+          </div>
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-550 uppercase tracking-wider flex items-center gap-1"
+            >
+              <Download class="text-teal-400" size={13} />
+              Download
+            </span>
+            <span class="text-2xl font-black text-teal-350 mt-2 block"
+              >{formatBytes(getDetailDownloadBytes())}</span
+            >
+            <span class="text-xs text-slate-505 mt-1">Received data</span>
+          </div>
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-550 uppercase tracking-wider flex items-center gap-1"
+            >
+              <Upload class="text-violet-400" size={13} />
+              Upload
+            </span>
+            <span class="text-2xl font-black text-violet-300 mt-2 block"
+              >{formatBytes(getDetailUploadBytes())}</span
+            >
+            <span class="text-xs text-slate-505 mt-1">Sent data</span>
+          </div>
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-550 uppercase tracking-wider"
+              >Active Apps</span
+            >
+            <span class="text-2xl font-black text-slate-200 mt-2 block"
+              >{filteredMoreRows.length}</span
+            >
+            <span class="text-xs text-slate-505 mt-1"
+              >Attributed this period</span
+            >
+          </div>
+        </div>
+
+        <!-- Main Content List Card -->
+        <section class="silo-card p-6 space-y-6">
+          <!-- Search Bar -->
+          <div class="relative w-full">
+            <Search
+              class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-550"
+              size={17}
+            />
+            <input
+              class="silo-input pl-10.5 w-full bg-slate-950/40 focus:border-teal-400 transition-colors"
+              placeholder="Search apps..."
+              bind:value={moreModalSearch}
+            />
+          </div>
+
+          <!-- Table Headers (Desktop) -->
+          <div
+            class="hidden sm:grid grid-cols-[1.5fr_1fr_1fr_1fr] px-4 py-2 border-b border-slate-800/60 text-xs font-extrabold text-slate-550 tracking-wider"
+          >
+            <span>APPLICATION</span>
+            <span class="text-right flex items-center justify-end gap-1"
+              ><Download size={11} /> DOWNLOAD</span
+            >
+            <span class="text-right flex items-center justify-end gap-1"
+              ><Upload size={11} /> UPLOAD</span
+            >
+            <span class="text-right">TOTAL</span>
+          </div>
+
+          <div class="space-y-3.5">
+            {#if filteredMoreRows.length}
+              {#each filteredMoreRows as row, i}
+                {@const totalBytes = consumerTotal(row)}
+                {@const sharePercentage = (
+                  (totalBytes / Math.max(1, getDetailTotalBytes())) *
+                  105
+                ).toFixed(1)}
+                <div
+                  class="silo-card p-4 hover:border-slate-700/85 hover:bg-slate-900/30 transition-all duration-200 group flex flex-col gap-3"
+                >
+                  <!-- Row top info -->
+                  <div
+                    class="flex flex-col sm:grid sm:grid-cols-[1.5fr_1fr_1fr_1fr] items-start sm:items-center justify-between gap-2.5"
+                  >
+                    <div class="flex items-center gap-3 min-w-0 w-full">
+                      <!-- Rank badge -->
+                      <span
+                        class="text-xs font-black px-2 py-1 bg-slate-800 text-slate-400 group-hover:bg-teal-400 group-hover:text-slate-950 rounded-md transition-colors w-7 text-center"
+                      >
+                        #{i + 1}
+                      </span>
+                      <p
+                        class="truncate font-black text-slate-200 group-hover:text-teal-300 transition-colors"
+                      >
+                        {row.name}
+                      </p>
+                    </div>
+
+                    <!-- Down bytes -->
+                    <div
+                      class="flex justify-between w-full sm:w-auto sm:justify-end text-sm text-slate-400 sm:text-right"
+                    >
+                      <span class="sm:hidden font-semibold text-slate-500"
+                        >Download</span
+                      >
+                      <span class="font-semibold text-teal-350/90"
+                        >{formatBytes(row.downloadBytes)}</span
+                      >
+                    </div>
+
+                    <!-- Up bytes -->
+                    <div
+                      class="flex justify-between w-full sm:w-auto sm:justify-end text-sm text-slate-400 sm:text-right"
+                    >
+                      <span class="sm:hidden font-semibold text-slate-500"
+                        >Upload</span
+                      >
+                      <span class="font-semibold text-violet-350"
+                        >{formatBytes(row.uploadBytes)}</span
+                      >
+                    </div>
+
+                    <!-- Total bytes & Share % -->
+                    <div
+                      class="flex justify-between w-full sm:w-auto sm:justify-end items-center gap-2 sm:text-right font-black text-slate-100"
+                    >
+                      <span class="sm:hidden font-bold text-slate-500"
+                        >Total</span
+                      >
+                      <div class="flex items-baseline gap-1.5 justify-end">
+                        <span class="text-slate-100"
+                          >{formatBytes(totalBytes)}</span
+                        >
+                        <span class="text-xs text-slate-500 font-semibold"
+                          >({sharePercentage}%)</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Distribution Progress Bar -->
+                  <div class="h-2 rounded-full bg-slate-950/70 overflow-hidden">
+                    <div
+                      class="h-full rounded-full bg-gradient-to-r from-teal-400 to-violet-500 transition-all duration-500"
+                      style={`width: ${Math.max(4, Math.min(100, (totalBytes / Math.max(1, getDetailTotalBytes())) * 105))}%`}
+                    ></div>
+                  </div>
+                </div>
+              {/each}
+            {:else}
+              <EmptyState
+                compact
+                icon={Search}
+                title="No results found"
+                message="Try a different search query."
+              />
+            {/if}
+          </div>
+        </section>
+      </section>
+    {:else if activeView === "network-sites"}
+      <section
+        class="mx-auto max-w-5xl space-y-6"
+        transition:fade={{ duration: 150 }}
+      >
+        <!-- Header Nav Row -->
+        <header
+          class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
+        >
+          <div class="flex items-center gap-4">
+            <button
+              class="inline-flex items-center gap-2 text-slate-300 hover:text-slate-100 bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-semibold transition hover:scale-[1.02] active:scale-[0.98] border border-slate-700/50"
+              type="button"
+              onclick={() => (activeView = "network")}
+            >
+              ← Back
+            </button>
+            <div>
+              <h1 class="text-3xl font-black flex items-center gap-2">
+                <Globe class="text-teal-350 shrink-0" size={24} />
+                All Site Usages
+              </h1>
+              <p class="text-sm text-slate-505 mt-0.5">
+                Detailed metrics of visited websites
+              </p>
+            </div>
+          </div>
+
+          <!-- Date Range Pills -->
+          <div
+            class="flex rounded-xl bg-slate-900/90 border border-slate-800 p-1 w-fit shadow-lg shadow-black/20 self-start md:self-auto"
+          >
+            {#each [{ key: "today", label: "Today" }, { key: "7d", label: "Last 7 Days" }, { key: "30d", label: "Last 30 Days" }] as range}
+              <button
+                class="rounded-lg px-4 py-2 text-xs font-bold transition-all duration-200 {detailRange ===
+                range.key
+                  ? 'bg-teal-400 text-slate-950 font-black shadow-md'
+                  : 'text-slate-400 hover:text-slate-100'}"
+                type="button"
+                onclick={() =>
+                  loadDetailUsage(range.key as "today" | "7d" | "30d")}
+              >
+                {range.label}
+              </button>
+            {/each}
+          </div>
+        </header>
+
+        <!-- Stats Overview Cards Grid -->
+        <div class="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-500 uppercase tracking-wider"
+              >Total Usage</span
+            >
+            <span class="text-2xl font-black text-slate-200 mt-2 block"
+              >{formatBytes(getDetailTotalBytes())}</span
+            >
+            <span class="text-xs text-slate-505 mt-1">Upload + Download</span>
+          </div>
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-550 uppercase tracking-wider flex items-center gap-1"
+            >
+              <Download class="text-teal-400" size={13} />
+              Download
+            </span>
+            <span class="text-2xl font-black text-teal-350 mt-2 block"
+              >{formatBytes(getDetailDownloadBytes())}</span
+            >
+            <span class="text-xs text-slate-505 mt-1">Received data</span>
+          </div>
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-550 uppercase tracking-wider flex items-center gap-1"
+            >
+              <Upload class="text-violet-400" size={13} />
+              Upload
+            </span>
+            <span class="text-2xl font-black text-violet-300 mt-2 block"
+              >{formatBytes(getDetailUploadBytes())}</span
+            >
+            <span class="text-xs text-slate-505 mt-1">Sent data</span>
+          </div>
+          <div
+            class="silo-card p-5 flex flex-col justify-between bg-slate-900/40 border border-slate-800/80"
+          >
+            <span
+              class="text-xs font-bold text-slate-550 uppercase tracking-wider"
+              >Active Sites</span
+            >
+            <span class="text-2xl font-black text-slate-200 mt-2 block"
+              >{filteredMoreRows.length}</span
+            >
+            <span class="text-xs text-slate-505 mt-1"
+              >Attributed this period</span
+            >
+          </div>
+        </div>
+
+        <!-- Main Content List Card -->
+        <section class="silo-card p-6 space-y-6">
+          <!-- Search Bar -->
+          <div class="relative w-full">
+            <Search
+              class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-550"
+              size={17}
+            />
+            <input
+              class="silo-input pl-10.5 w-full bg-slate-950/40 focus:border-teal-400 transition-colors"
+              placeholder="Search sites..."
+              bind:value={moreModalSearch}
+            />
+          </div>
+
+          <!-- Table Headers (Desktop) -->
+          <div
+            class="hidden sm:grid grid-cols-[1.5fr_1fr_1fr_1fr] px-4 py-2 border-b border-slate-800/60 text-xs font-extrabold text-slate-550 tracking-wider"
+          >
+            <span>WEBSITE</span>
+            <span class="text-right flex items-center justify-end gap-1"
+              ><Download size={11} /> DOWNLOAD</span
+            >
+            <span class="text-right flex items-center justify-end gap-1"
+              ><Upload size={11} /> UPLOAD</span
+            >
+            <span class="text-right">TOTAL</span>
+          </div>
+
+          <div class="space-y-3.5">
+            {#if filteredMoreRows.length}
+              {#each filteredMoreRows as row, i}
+                {@const totalBytes = consumerTotal(row)}
+                {@const sharePercentage = (
+                  (totalBytes / Math.max(1, getDetailTotalBytes())) *
+                  105
+                ).toFixed(1)}
+                <div
+                  class="silo-card p-4 hover:border-slate-700/85 hover:bg-slate-900/30 transition-all duration-200 group flex flex-col gap-3"
+                >
+                  <!-- Row top info -->
+                  <div
+                    class="flex flex-col sm:grid sm:grid-cols-[1.5fr_1fr_1fr_1fr] items-start sm:items-center justify-between gap-2.5"
+                  >
+                    <div class="flex items-center gap-3 min-w-0 w-full">
+                      <!-- Rank badge -->
+                      <span
+                        class="text-xs font-black px-2 py-1 bg-slate-800 text-slate-400 group-hover:bg-teal-400 group-hover:text-slate-950 rounded-md transition-colors w-7 text-center"
+                      >
+                        #{i + 1}
+                      </span>
+                      <p
+                        class="truncate font-black text-slate-200 group-hover:text-teal-300 transition-colors"
+                      >
+                        {row.name}
+                      </p>
+                    </div>
+
+                    <!-- Down bytes -->
+                    <div
+                      class="flex justify-between w-full sm:w-auto sm:justify-end text-sm text-slate-400 sm:text-right"
+                    >
+                      <span class="sm:hidden font-semibold text-slate-500"
+                        >Download</span
+                      >
+                      <span class="font-semibold text-teal-350/90"
+                        >{formatBytes(row.downloadBytes)}</span
+                      >
+                    </div>
+
+                    <!-- Up bytes -->
+                    <div
+                      class="flex justify-between w-full sm:w-auto sm:justify-end text-sm text-slate-400 sm:text-right"
+                    >
+                      <span class="sm:hidden font-semibold text-slate-500"
+                        >Upload</span
+                      >
+                      <span class="font-semibold text-violet-350"
+                        >{formatBytes(row.uploadBytes)}</span
+                      >
+                    </div>
+
+                    <!-- Total bytes & Share % -->
+                    <div
+                      class="flex justify-between w-full sm:w-auto sm:justify-end items-center gap-2 sm:text-right font-black text-slate-100"
+                    >
+                      <span class="sm:hidden font-bold text-slate-500"
+                        >Total</span
+                      >
+                      <div class="flex items-baseline gap-1.5 justify-end">
+                        <span class="text-slate-100"
+                          >{formatBytes(totalBytes)}</span
+                        >
+                        <span class="text-xs text-slate-500 font-semibold"
+                          >({sharePercentage}%)</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Distribution Progress Bar -->
+                  <div class="h-2 rounded-full bg-slate-950/70 overflow-hidden">
+                    <div
+                      class="h-full rounded-full bg-gradient-to-r from-teal-400 to-violet-500 transition-all duration-500"
+                      style={`width: ${Math.max(4, Math.min(100, (totalBytes / Math.max(1, getDetailTotalBytes())) * 105))}%`}
+                    ></div>
+                  </div>
+                </div>
+              {/each}
+            {:else}
+              <EmptyState
+                compact
+                icon={Search}
+                title="No results found"
+                message="Try a different search query."
+              />
+            {/if}
+          </div>
         </section>
       </section>
     {:else if activeView === "settings" && settings}
@@ -1077,8 +1947,19 @@
             <h2 class="text-lg font-bold">General</h2>
           </div>
           <div class="mt-6 space-y-5">
-            {@render SettingToggle("Launch at startup", "Start SILO when you log in", settings.autoStart, (checked) => (settings = { ...settings!, autoStart: checked }))}
-            {@render SettingToggle("Notifications", "Get time limit warnings and summaries", settings.notificationsEnabled, (checked) => (settings = { ...settings!, notificationsEnabled: checked }))}
+            {@render SettingToggle(
+              "Launch at startup",
+              "Start SILO when you log in",
+              settings.autoStart,
+              (checked) => (settings = { ...settings!, autoStart: checked }),
+            )}
+            {@render SettingToggle(
+              "Notifications",
+              "Get time limit warnings and summaries",
+              settings.notificationsEnabled,
+              (checked) =>
+                (settings = { ...settings!, notificationsEnabled: checked }),
+            )}
           </div>
         </section>
 
@@ -1090,11 +1971,21 @@
           <div class="mt-6 grid gap-4 sm:grid-cols-2">
             <label class="text-sm font-semibold text-slate-300">
               Detailed history retention
-              <input class="silo-input mt-2" min="1" type="number" bind:value={settings.retentionDays} />
+              <input
+                class="silo-input mt-2"
+                min="1"
+                type="number"
+                bind:value={settings.retentionDays}
+              />
             </label>
             <label class="text-sm font-semibold text-slate-300">
               Network polling interval
-              <input class="silo-input mt-2" min="1" type="number" bind:value={settings.sampleIntervalSeconds} />
+              <input
+                class="silo-input mt-2"
+                min="1"
+                type="number"
+                bind:value={settings.sampleIntervalSeconds}
+              />
             </label>
           </div>
         </section>
@@ -1113,7 +2004,9 @@
                 <option value="dark">Dark</option>
               </select>
             </label>
-            <p class="mt-3 text-sm text-slate-500">The UI uses the dark SILO shell in this implementation pass.</p>
+            <p class="mt-3 text-sm text-slate-500">
+              The UI uses the dark SILO shell in this implementation pass.
+            </p>
           </div>
         </section>
 
@@ -1123,30 +2016,54 @@
             <h2 class="text-lg font-bold">Privacy &amp; Data</h2>
           </div>
           <div class="mt-6 space-y-3">
-            <button class="silo-button-secondary w-full justify-center" type="button" onclick={exportUsage} disabled={exporting}>
+            <button
+              class="silo-button-secondary w-full justify-center"
+              type="button"
+              onclick={exportUsage}
+              disabled={exporting}
+            >
               <Download size={16} />
               Export Usage Data
             </button>
-            <button class="silo-button-secondary w-full justify-center" type="button" onclick={exportLogs} disabled={exporting}>
+            <button
+              class="silo-button-secondary w-full justify-center"
+              type="button"
+              onclick={exportLogs}
+              disabled={exporting}
+            >
               <FileDown size={16} />
               Export Logs
             </button>
-            <button class="silo-button-secondary w-full justify-center" type="button" onclick={completeBackup}>
+            <button
+              class="silo-button-secondary w-full justify-center"
+              type="button"
+              onclick={completeBackup}
+            >
               <RotateCcw size={16} />
               Mark Backup Complete
             </button>
           </div>
           {#if settings.lastBackupAt}
-            <p class="mt-4 text-sm text-slate-500">Last backup: {settings.lastBackupAt}</p>
+            <p class="mt-4 text-sm text-slate-500">
+              Last backup: {settings.lastBackupAt}
+            </p>
           {/if}
           {#if exportPath}
-            <p class="mt-4 break-all rounded-lg bg-slate-950/60 p-3 text-sm text-slate-400">{exportPath}</p>
+            <p
+              class="mt-4 break-all rounded-lg bg-slate-950/60 p-3 text-sm text-slate-400"
+            >
+              {exportPath}
+            </p>
           {/if}
         </section>
 
         <section class="silo-card p-6">
           <div class="flex items-center gap-3">
-            <IconBadge icon={Keyboard} tone="neutral" label="Keyboard shortcuts" />
+            <IconBadge
+              icon={Keyboard}
+              tone="neutral"
+              label="Keyboard shortcuts"
+            />
             <h2 class="text-lg font-bold">Keyboard Shortcuts</h2>
           </div>
           <EmptyState
@@ -1158,7 +2075,12 @@
         </section>
 
         <section class="flex justify-end">
-          <button class="silo-button" type="button" onclick={saveSettings} disabled={savingSettings}>
+          <button
+            class="silo-button"
+            type="button"
+            onclick={saveSettings}
+            disabled={savingSettings}
+          >
             {savingSettings ? "Saving" : "Save Settings"}
           </button>
         </section>
@@ -1166,7 +2088,13 @@
     {/if}
   </div>
 
-  <BottomNav items={navItems} active={activeView} onSelect={(key) => (activeView = key as ViewKey)} />
+  <BottomNav
+    items={navItems}
+    active={activeView === "network-apps" || activeView === "network-sites"
+      ? "network"
+      : activeView}
+    onSelect={(key) => (activeView = key as ViewKey)}
+  />
 
   {#if showViolationOverlay && violationData}
     <div
@@ -1177,16 +2105,22 @@
         transition:fly={{ y: 25, duration: 250 }}
         class="silo-card max-w-md w-full p-8 border border-red-500/30 bg-slate-900/90 shadow-2xl text-center space-y-6"
       >
-        <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 text-red-400">
+        <div
+          class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 text-red-400"
+        >
           <CircleAlert size={32} />
         </div>
         <div class="space-y-2">
-          <h2 class="text-2xl font-black text-slate-100">Focus Limit Reached</h2>
+          <h2 class="text-2xl font-black text-slate-100">
+            Focus Limit Reached
+          </h2>
           <p class="text-sm text-slate-400">
             You've set a rule restricting access to this {violationData.ruleType}.
           </p>
         </div>
-        <div class="rounded-lg bg-slate-950/50 p-4 border border-slate-800 font-mono">
+        <div
+          class="rounded-lg bg-slate-950/50 p-4 border border-slate-800 font-mono"
+        >
           <span class="text-red-300 font-bold">{violationData.target}</span>
           <div class="text-xs text-slate-500 mt-1">
             Limit: {formatDuration(violationData.limitSeconds)}
@@ -1210,14 +2144,18 @@
 
   <!-- Toast Notification Container -->
   {#if toasts.length}
-    <div class="fixed top-6 right-6 z-[1000] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+    <div
+      class="fixed top-6 right-6 z-[1000] flex flex-col gap-3 max-w-sm w-full pointer-events-none"
+    >
       {#each toasts as toast (toast.id)}
         <div
           transition:fly={{ x: 100, duration: 300 }}
           class="pointer-events-auto p-4 rounded-xl border backdrop-blur-md shadow-lg flex items-center gap-3 text-sm font-semibold transition-all
-            {toast.type === 'success' ? 'border-emerald-500/30 bg-emerald-950/80 text-emerald-300' :
-             toast.type === 'error' ? 'border-red-500/30 bg-red-950/80 text-red-300' :
-             'border-blue-500/30 bg-blue-950/80 text-blue-300'}"
+            {toast.type === 'success'
+            ? 'border-emerald-500/30 bg-emerald-950/80 text-emerald-300'
+            : toast.type === 'error'
+              ? 'border-red-500/30 bg-red-950/80 text-red-300'
+              : 'border-blue-500/30 bg-blue-950/80 text-blue-300'}"
         >
           <div class="flex-1">{toast.message}</div>
         </div>
@@ -1226,44 +2164,76 @@
   {/if}
 </main>
 
-{#snippet ConsumerList(title: string, rows: DataConsumer[], icon: any)}
-  <section class="silo-card p-6">
-    <div class="flex items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <IconBadge {icon} tone="teal" label={title} />
-        <h2 class="text-lg font-bold">{title}</h2>
+{#snippet ConsumerList(
+  title: string,
+  rows: DataConsumer[],
+  label: string,
+  icon: any,
+)}
+  <section class="silo-card p-6 flex flex-col justify-between">
+    <div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <IconBadge {icon} tone="teal" label={title} />
+          <h2 class="text-lg font-bold">{title}</h2>
+        </div>
+        <span class="text-xs text-slate-500">{dataRange}</span>
       </div>
-      <span class="text-xs text-slate-500">{dataRange}</span>
-    </div>
-    <div class="mt-6 space-y-5">
-      {#if rows.length}
-        {#each rows.slice(0, 8) as row}
-          <div>
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <p class="truncate font-bold">{row.name}</p>
-                <p class="text-sm text-slate-500">
-                  Down {formatBytes(row.downloadBytes)} · Up {formatBytes(row.uploadBytes)}
+      <div class="mt-6 space-y-5">
+        {#if rows.length}
+          {#each rows.slice(0, 5) as row}
+            <div>
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="truncate font-bold">{row.name}</p>
+                  <p class="text-sm text-slate-500">
+                    Down {formatBytes(row.downloadBytes)} · Up {formatBytes(
+                      row.uploadBytes,
+                    )}
+                  </p>
+                </div>
+                <p class="shrink-0 text-sm font-bold">
+                  {formatBytes(consumerTotal(row))}
                 </p>
               </div>
-              <p class="shrink-0 text-sm font-bold">{formatBytes(consumerTotal(row))}</p>
+              <div class="mt-2 h-2 rounded-full bg-slate-800">
+                <div
+                  class="h-2 rounded-full bg-teal-400"
+                  style={`width: ${Math.max(4, Math.min(100, (consumerTotal(row) / Math.max(1, totalDataBytes())) * 100))}%`}
+                ></div>
+              </div>
             </div>
-            <div class="mt-2 h-2 rounded-full bg-slate-800">
-              <div
-                class="h-2 rounded-full bg-teal-400"
-                style={`width: ${Math.max(4, Math.min(100, (consumerTotal(row) / Math.max(1, totalDataBytes())) * 100))}%`}
-              ></div>
-            </div>
-          </div>
-        {/each}
-      {:else}
-        <EmptyState compact icon={HardDrive} title="No usage records" message="Per-app and per-site data usage will appear after attribution is implemented." />
-      {/if}
+          {/each}
+        {:else}
+          <EmptyState
+            compact
+            icon={HardDrive}
+            title="No usage records"
+            message="Per-app and per-site data usage will appear after attribution is implemented."
+          />
+        {/if}
+      </div>
     </div>
+    {#if rows.length > 5}
+      <div class="mt-6 border-t border-slate-800 pt-4 text-center">
+        <button
+          class="silo-button-secondary w-full justify-center py-2"
+          type="button"
+          onclick={() => openMoreScreen(title, rows)}
+        >
+          View all {label}
+        </button>
+      </div>
+    {/if}
   </section>
 {/snippet}
 
-{#snippet SettingToggle(title: string, description: string, checked: boolean, onChange: (checked: boolean) => void)}
+{#snippet SettingToggle(
+  title: string,
+  description: string,
+  checked: boolean,
+  onChange: (checked: boolean) => void,
+)}
   <div class="flex items-center justify-between gap-4">
     <div>
       <p class="font-semibold">{title}</p>

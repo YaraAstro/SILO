@@ -16,7 +16,7 @@ use storage::Storage;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Emitter, Manager, WindowEvent, Listener,
 };
 
 pub struct AppState {
@@ -205,23 +205,60 @@ pub fn run() {
             spawn_monitoring(app.handle().clone());
 
             let show_i = MenuItemBuilder::with_id("show", "Show SILO").build(app)?;
+            let add_rule_i = MenuItemBuilder::with_id("add_rule", "Add Rule").build(app)?;
+            let app_state = app.state::<AppState>();
+            let toggle_focus_text = if app_state.focus_mode_enabled() {
+                "Stop Focus Mode"
+            } else {
+                "Start Focus Mode"
+            };
+            let toggle_focus_i = MenuItemBuilder::with_id("toggle_focus", toggle_focus_text).build(app)?;
             let quit_i = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-            let separator = PredefinedMenuItem::separator(app)?;
+            let separator1 = PredefinedMenuItem::separator(app)?;
+            let separator2 = PredefinedMenuItem::separator(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&show_i, &separator, &quit_i])
+                .items(&[
+                    &show_i,
+                    &add_rule_i,
+                    &separator1,
+                    &toggle_focus_i,
+                    &separator2,
+                    &quit_i,
+                ])
                 .build()?;
 
+            let toggle_focus_clone = toggle_focus_i.clone();
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
+                .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
+                        }
+                        "add_rule" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                let _ = app.emit("navigate", "rules");
+                            }
+                        }
+                        "toggle_focus" => {
+                            let app_state = app.state::<AppState>();
+                            let enabled = !app_state.focus_mode_enabled();
+                            app_state.set_focus_mode(enabled);
+                            let _ = app.emit("focus_mode_changed", serde_json::json!({ "enabled": enabled }));
+                            
+                            let new_text = if enabled {
+                                "Stop Focus Mode"
+                            } else {
+                                "Start Focus Mode"
+                            };
+                            let _ = toggle_focus_clone.set_text(new_text);
                         }
                         "quit" => {
                             app.exit(0);
@@ -248,6 +285,20 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            let toggle_focus_listener = toggle_focus_i.clone();
+            app.listen_any("focus_mode_changed", move |event| {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    if let Some(enabled) = payload.get("enabled").and_then(|v| v.as_bool()) {
+                        let new_text = if enabled {
+                            "Stop Focus Mode"
+                        } else {
+                            "Start Focus Mode"
+                        };
+                        let _ = toggle_focus_listener.set_text(new_text);
+                    }
+                }
+            });
 
             app.emit(
                 "app_ready",
