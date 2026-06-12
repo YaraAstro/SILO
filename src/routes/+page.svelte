@@ -50,7 +50,8 @@
     type Rule,
     type Settings,
     type UsageReport,
-    type UsageTimeline
+    type UsageTimeline,
+    type UsageDayBytes
   } from "$lib/siloApi";
 
   type ViewKey = "dashboard" | "rules" | "stats" | "network" | "settings";
@@ -85,6 +86,10 @@
   let showAppDropdown = $state(false);
   let showViolationOverlay = $state(false);
   let violationData = $state<{ target: string; ruleType: string; enforcement: string; limitSeconds: number } | null>(null);
+
+  let liveNetworkSamples = $state<Array<{ time: string; down: number; up: number }>>([]);
+  let networkHistoryRange = $state<"7d" | "30d">("7d");
+  let networkHistory = $state<UsageDayBytes[]>([]);
 
   let touchStartX = 0;
   let touchStartY = 0;
@@ -216,7 +221,15 @@
     try {
       boot = await siloApi.handshake();
       settings = boot.settings;
-      await Promise.all([loadSnapshot(), loadRules(), loadTodayUsage(), loadTimeline(), loadDataUsage(dataRange), loadAvailableApps()]);
+      await Promise.all([
+        loadSnapshot(),
+        loadRules(),
+        loadTodayUsage(),
+        loadTimeline(),
+        loadDataUsage(dataRange),
+        loadAvailableApps(),
+        loadNetworkHistory()
+      ]);
     } catch (error) {
       errorMessage = toErrorMessage(error);
     } finally {
@@ -239,9 +252,72 @@
   }
 
   async function refreshLiveState() {
-    await Promise.all([loadSnapshot(), loadDataUsage(dataRange)]).catch((error) => {
+    await Promise.all([loadSnapshot(), loadDataUsage(dataRange), loadNetworkHistory()]).catch((error) => {
       errorMessage = toErrorMessage(error);
     });
+
+    const nowTime = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const downloadMb = (snapshot?.networkSpeed.downloadBps ?? 0) / 1_048_576;
+    const uploadMb = (snapshot?.networkSpeed.uploadBps ?? 0) / 1_048_576;
+    liveNetworkSamples = [...liveNetworkSamples, { time: nowTime, down: downloadMb, up: uploadMb }].slice(-60);
+  }
+
+  async function loadNetworkHistory() {
+    try {
+      networkHistory = await siloApi.getNetworkHistory(networkHistoryRange);
+    } catch (error) {
+      console.error("Failed to load network history:", error);
+    }
+  }
+
+  async function changeNetworkHistoryRange(range: "7d" | "30d") {
+    networkHistoryRange = range;
+    await loadNetworkHistory();
+  }
+
+  function liveChartData() {
+    return [
+      {
+        label: "Download (MB/s)",
+        data: liveNetworkSamples.map(s => s.down),
+        backgroundColor: "rgba(20, 184, 166, 0.15)",
+        borderColor: "#2dd4bf",
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      },
+      {
+        label: "Upload (MB/s)",
+        data: liveNetworkSamples.map(s => s.up),
+        backgroundColor: "rgba(139, 92, 246, 0.15)",
+        borderColor: "#a78bfa",
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }
+    ];
+  }
+
+  function liveChartLabels() {
+    return liveNetworkSamples.map(s => s.time);
+  }
+
+  function historyChartData() {
+    return [
+      {
+        label: "Total Usage (MB)",
+        data: networkHistory.map(day => Math.round((day.downloadBytes + day.uploadBytes) / 1_048_576)),
+        backgroundColor: "rgba(20, 184, 166, 0.85)",
+        borderColor: "#2dd4bf",
+        borderRadius: 6
+      }
+    ];
+  }
+
+  function historyChartLabels() {
+    return networkHistory.map(day => formatDateLabel(day.date));
   }
 
   async function loadSnapshot() {
@@ -912,7 +988,13 @@
               <p class="mt-2 text-sm text-slate-500">Today: {formatBytes(dataUsage?.totalUploadBytes ?? 0)}</p>
             </div>
           </div>
-          <div class="mt-8 h-1 rounded-full bg-teal-400/70"></div>
+          {#if liveNetworkSamples.length > 1}
+            <div class="mt-8">
+              <TrendChart labels={liveChartLabels()} datasets={liveChartData()} type="line" height={200} />
+            </div>
+          {:else}
+            <div class="mt-8 h-1 rounded-full bg-teal-400/70"></div>
+          {/if}
         </section>
 
         <section class="silo-card p-6">
@@ -952,12 +1034,34 @@
         </div>
 
         <section class="silo-card p-6">
-          <h2 class="text-lg font-bold">Usage History</h2>
-          <EmptyState
-            icon={HardDrive}
-            title="Network history unavailable"
-            message="Historical speed samples will appear after the network monitoring backend starts persisting samples."
-          />
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-lg font-bold">Usage History</h2>
+              <p class="text-sm text-slate-500">Total data usage (upload + download) per day</p>
+            </div>
+            <div class="flex rounded-lg bg-slate-800 p-1">
+              {#each ["7d", "30d"] as range}
+                <button
+                  class="rounded-md px-3 py-2 text-xs font-bold transition {networkHistoryRange === range ? 'bg-slate-950 text-slate-100' : 'text-slate-400 hover:text-slate-100'}"
+                  type="button"
+                  onclick={() => changeNetworkHistoryRange(range as "7d" | "30d")}
+                >
+                  {range === "7d" ? "Weekly" : "Monthly"}
+                </button>
+              {/each}
+            </div>
+          </div>
+          {#if networkHistory.length}
+            <div class="mt-6">
+              <TrendChart labels={historyChartLabels()} datasets={historyChartData()} type="bar" height={260} />
+            </div>
+          {:else}
+            <EmptyState
+              icon={HardDrive}
+              title="No history logged yet"
+              message="Attributed daily network volume will appear here as SILO measures background traffic."
+            />
+          {/if}
         </section>
       </section>
     {:else if activeView === "settings" && settings}

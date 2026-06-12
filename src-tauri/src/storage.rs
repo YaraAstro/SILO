@@ -1,6 +1,6 @@
 use crate::models::{
     CompletedSession, DataConsumer, DataUsageReport, Rule, RulesSummary, Settings, UsageBucket,
-    UsageDay, UsageReport, UsageTimeline,
+    UsageDay, UsageReport, UsageTimeline, UsageDayBytes,
 };
 use anyhow::Context;
 use chrono::{Duration, Utc};
@@ -432,6 +432,82 @@ impl Storage {
             |row| row.get(0),
         ).optional()?;
         Ok(seconds.unwrap_or(0))
+    }
+
+    pub fn track_app_data_usage(&self, app_name: &str, upload_bytes: i64, download_bytes: i64) -> anyhow::Result<()> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let exists: Option<i64> = conn.query_row(
+            "SELECT id FROM app_data_usage WHERE app_name = ?1 AND date = ?2 LIMIT 1",
+            params![app_name, today],
+            |row| row.get(0),
+        ).optional()?;
+
+        match exists {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE app_data_usage SET upload_bytes = upload_bytes + ?1, download_bytes = download_bytes + ?2 WHERE id = ?3",
+                    params![upload_bytes, download_bytes, id],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO app_data_usage (app_name, date, upload_bytes, download_bytes) VALUES (?1, ?2, ?3, ?4)",
+                    params![app_name, today, upload_bytes, download_bytes],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn track_site_data_usage(&self, domain: &str, upload_bytes: i64, download_bytes: i64) -> anyhow::Result<()> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let exists: Option<i64> = conn.query_row(
+            "SELECT id FROM site_data_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
+            params![domain, today],
+            |row| row.get(0),
+        ).optional()?;
+
+        match exists {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE site_data_usage SET upload_bytes = upload_bytes + ?1, download_bytes = download_bytes + ?2 WHERE id = ?3",
+                    params![upload_bytes, download_bytes, id],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO site_data_usage (domain, date, upload_bytes, download_bytes) VALUES (?1, ?2, ?3, ?4)",
+                    params![domain, today, upload_bytes, download_bytes],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn network_usage_history(&self, days: i64) -> anyhow::Result<Vec<UsageDayBytes>> {
+        let start = (Utc::now().date_naive() - Duration::days(days - 1)).to_string();
+        let conn = self.connection.lock();
+        let mut statement = conn.prepare(
+            "SELECT date, SUM(upload_bytes), SUM(download_bytes)
+             FROM (
+               SELECT date, upload_bytes, download_bytes FROM app_data_usage
+               UNION ALL
+               SELECT date, upload_bytes, download_bytes FROM site_data_usage
+             )
+             WHERE date >= ?1
+             GROUP BY date
+             ORDER BY date ASC"
+        )?;
+        let rows = statement.query_map(params![start], |row| {
+            Ok(UsageDayBytes {
+                date: row.get(0)?,
+                upload_bytes: row.get(1)?,
+                download_bytes: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
 

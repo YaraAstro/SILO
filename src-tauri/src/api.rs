@@ -1,6 +1,7 @@
 use crate::{
     models::{
         AppSnapshot, BootStatus, DataUsageReport, ExportResult, NetworkSpeed, Rule, Settings,
+        UsageDayBytes,
     },
     AppState,
 };
@@ -183,6 +184,16 @@ pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<Strin
     let mut sorted_apps: Vec<String> = apps.into_iter().collect();
     sorted_apps.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
     Ok(sorted_apps)
+}
+
+#[tauri::command]
+pub fn get_network_history(state: State<'_, AppState>, range: String) -> CommandResult<Vec<UsageDayBytes>> {
+    let days = match range.as_str() {
+        "7d" => 7,
+        "30d" => 30,
+        _ => 7,
+    };
+    state.storage().network_usage_history(days).map_err(to_command_error)
 }
 
 #[derive(Clone, Debug, Serialize)]

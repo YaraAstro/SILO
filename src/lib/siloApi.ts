@@ -82,6 +82,12 @@ export type ExportResult = {
   filePath: string;
 };
 
+export type UsageDayBytes = {
+  date: string;
+  uploadBytes: number;
+  downloadBytes: number;
+};
+
 export const emptyRule = (): Rule => ({
   id: null,
   ruleType: "app",
@@ -112,5 +118,6 @@ export const siloApi = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   markBackupComplete: () => invoke<Settings>("mark_backup_complete"),
-  getAvailableApps: () => invoke<string[]>("get_available_apps")
+  getAvailableApps: () => invoke<string[]>("get_available_apps"),
+  getNetworkHistory: (range: string) => invoke<UsageDayBytes[]>("get_network_history", { range })
 };

@@ -176,3 +176,11 @@ pub struct DataConsumer {
 pub struct ExportResult {
     pub file_path: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDayBytes {
+    pub date: String,
+    pub upload_bytes: i64,
+    pub download_bytes: i64,
+}
