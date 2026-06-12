@@ -13,7 +13,11 @@ use models::AppReadyEvent;
 use monitor::{Monitor, NetworkMonitor};
 use std::time::Duration;
 use storage::Storage;
-use tauri::{Emitter, Manager};
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, WindowEvent,
+};
 
 pub struct AppState {
     storage: Storage,
@@ -189,10 +193,62 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let state = AppState::new()?;
             app.manage(state);
             spawn_monitoring(app.handle().clone());
+
+            let show_i = MenuItemBuilder::with_id("show", "Show SILO").build(app)?;
+            let quit_i = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let menu = MenuBuilder::new(app)
+                .items(&[&show_i, &separator, &quit_i])
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Ok(true) = window.is_visible() {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
             app.emit(
                 "app_ready",
                 AppReadyEvent {
