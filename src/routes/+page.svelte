@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
+  import { fade, fly, slide } from "svelte/transition";
   import {
     Activity,
     Award,
@@ -84,6 +85,89 @@
   let showAppDropdown = $state(false);
   let showViolationOverlay = $state(false);
   let violationData = $state<{ target: string; ruleType: string; enforcement: string; limitSeconds: number } | null>(null);
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  function handleTouchStart(e: TouchEvent) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+
+  function handleTouchEnd(e: TouchEvent) {
+    const diffX = e.changedTouches[0].clientX - touchStartX;
+    const diffY = e.changedTouches[0].clientY - touchStartY;
+    
+    if (Math.abs(diffX) > 80 && Math.abs(diffY) < 50) {
+      const views: ViewKey[] = ["dashboard", "rules", "stats", "network", "settings"];
+      const currentIndex = views.indexOf(activeView);
+      if (diffX > 0) {
+        if (currentIndex > 0) {
+          activeView = views[currentIndex - 1];
+        }
+      } else {
+        if (currentIndex < views.length - 1) {
+          activeView = views[currentIndex + 1];
+        }
+      }
+    }
+  }
+
+  let lastSwipeTime = 0;
+
+  function handleWheel(e: WheelEvent) {
+    if (Math.abs(e.deltaX) > 35) {
+      const now = Date.now();
+      if (now - lastSwipeTime < 800) {
+        return;
+      }
+      
+      const views: ViewKey[] = ["dashboard", "rules", "stats", "network", "settings"];
+      const currentIndex = views.indexOf(activeView);
+      
+      if (e.deltaX < 0) {
+        if (currentIndex > 0) {
+          activeView = views[currentIndex - 1];
+          lastSwipeTime = now;
+        }
+      } else {
+        if (currentIndex < views.length - 1) {
+          activeView = views[currentIndex + 1];
+          lastSwipeTime = now;
+        }
+      }
+    }
+  }
+
+  interface Toast {
+    id: string;
+    message: string;
+    type: "success" | "error" | "info";
+  }
+
+  let toasts = $state<Toast[]>([]);
+
+  function showToast(message: string, type: "success" | "error" | "info" = "info") {
+    const id = Math.random().toString();
+    toasts = [...toasts, { id, message, type }];
+    setTimeout(() => {
+      toasts = toasts.filter((t) => t.id !== id);
+    }, 4000);
+
+    if (settings?.notificationsEnabled) {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        if (Notification.permission === "granted") {
+          new Notification("SILO", { body: message });
+        } else if (Notification.permission !== "denied") {
+          Notification.requestPermission().then((permission) => {
+            if (permission === "granted") {
+              new Notification("SILO", { body: message });
+            }
+          });
+        }
+      }
+    }
+  }
 
   onMount(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -184,7 +268,7 @@
 
   async function saveRule() {
     if (!ruleDraft.target.trim()) {
-      errorMessage = "Rule target is required.";
+      showToast("Rule target is required.", "error");
       return;
     }
 
@@ -194,8 +278,9 @@
       await siloApi.saveRule({ ...ruleDraft, target: ruleDraft.target.trim() });
       ruleDraft = emptyRule();
       await Promise.all([loadRules(), loadSnapshot()]);
+      showToast("Rule saved successfully!", "success");
     } catch (error) {
-      errorMessage = toErrorMessage(error);
+      showToast(toErrorMessage(error), "error");
     } finally {
       savingRule = false;
     }
@@ -203,8 +288,13 @@
 
   async function removeRule(rule: Rule) {
     if (rule.id === null || !window.confirm(`Delete rule for ${rule.target}?`)) return;
-    await siloApi.deleteRule(rule.id);
-    await Promise.all([loadRules(), loadSnapshot()]);
+    try {
+      await siloApi.deleteRule(rule.id);
+      await Promise.all([loadRules(), loadSnapshot()]);
+      showToast(`Rule for ${rule.target} deleted.`, "info");
+    } catch (error) {
+      showToast(toErrorMessage(error), "error");
+    }
   }
 
   function editRule(rule: Rule) {
@@ -213,9 +303,14 @@
   }
 
   async function toggleFocus() {
-    const enabled = await siloApi.toggleFocusMode();
-    if (snapshot) snapshot = { ...snapshot, focusMode: enabled };
-    if (boot) boot = { ...boot, focusMode: enabled };
+    try {
+      const enabled = await siloApi.toggleFocusMode();
+      if (snapshot) snapshot = { ...snapshot, focusMode: enabled };
+      if (boot) boot = { ...boot, focusMode: enabled };
+      showToast(enabled ? "Focus Mode started!" : "Focus Mode stopped.", "info");
+    } catch (error) {
+      showToast(toErrorMessage(error), "error");
+    }
   }
 
   async function saveSettings() {
@@ -225,15 +320,21 @@
     try {
       settings = await siloApi.saveSettings(settings);
       if (boot) boot = { ...boot, settings };
+      showToast("Settings saved successfully!", "success");
     } catch (error) {
-      errorMessage = toErrorMessage(error);
+      showToast(toErrorMessage(error), "error");
     } finally {
       savingSettings = false;
     }
   }
 
   async function completeBackup() {
-    settings = await siloApi.markBackupComplete();
+    try {
+      settings = await siloApi.markBackupComplete();
+      showToast("Backup status updated.", "success");
+    } catch (error) {
+      showToast(toErrorMessage(error), "error");
+    }
   }
 
   async function exportUsage() {
@@ -242,8 +343,9 @@
     try {
       const result = await siloApi.exportUsageData(dataRange);
       exportPath = result.filePath;
+      showToast("Usage data exported successfully!", "success");
     } catch (error) {
-      errorMessage = toErrorMessage(error);
+      showToast(toErrorMessage(error), "error");
     } finally {
       exporting = false;
     }
@@ -255,8 +357,9 @@
     try {
       const result = await siloApi.exportLogs(dataRange);
       exportPath = result.filePath;
+      showToast("Logs exported successfully!", "success");
     } catch (error) {
-      errorMessage = toErrorMessage(error);
+      showToast(toErrorMessage(error), "error");
     } finally {
       exporting = false;
     }
@@ -374,7 +477,7 @@
   <title>SILO</title>
 </svelte:head>
 
-<main class="min-h-screen bg-silo text-slate-100">
+<main class="min-h-screen bg-silo text-slate-100" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd} onwheel={handleWheel}>
   <div class="mx-auto min-h-screen w-full max-w-7xl px-4 pb-28 pt-8 sm:px-6 lg:px-8">
     {#if errorMessage}
       <div class="mb-5 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
@@ -591,15 +694,19 @@
                     showAppDropdown = true;
                     void loadAvailableApps();
                   }}
-                  onblur={() => setTimeout(() => showAppDropdown = false, 200)}
+                  onblur={() => (showAppDropdown = false)}
                 />
                 {#if showAppDropdown && filteredAvailableApps().length}
-                  <div class="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-xl scrollbar-thin scrollbar-thumb-slate-700">
+                  <div
+                    transition:slide={{ duration: 150 }}
+                    class="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-xl scrollbar-thin scrollbar-thumb-slate-700"
+                  >
                     {#each filteredAvailableApps() as app}
                       <button
                         type="button"
                         class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors"
-                        onclick={() => {
+                        onmousedown={(e) => {
+                          e.preventDefault();
                           ruleDraft.target = app;
                           showAppDropdown = false;
                         }}
@@ -958,8 +1065,14 @@
   <BottomNav items={navItems} active={activeView} onSelect={(key) => (activeView = key as ViewKey)} />
 
   {#if showViolationOverlay && violationData}
-    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md">
-      <div class="silo-card max-w-md w-full p-8 border border-red-500/30 bg-slate-900/90 shadow-2xl text-center space-y-6 animate-in fade-in zoom-in-95 duration-200">
+    <div
+      transition:fade={{ duration: 200 }}
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md"
+    >
+      <div
+        transition:fly={{ y: 25, duration: 250 }}
+        class="silo-card max-w-md w-full p-8 border border-red-500/30 bg-slate-900/90 shadow-2xl text-center space-y-6"
+      >
         <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 text-red-400">
           <CircleAlert size={32} />
         </div>
@@ -988,6 +1101,23 @@
           </button>
         </div>
       </div>
+    </div>
+  {/if}
+
+  <!-- Toast Notification Container -->
+  {#if toasts.length}
+    <div class="fixed top-6 right-6 z-[1000] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+      {#each toasts as toast (toast.id)}
+        <div
+          transition:fly={{ x: 100, duration: 300 }}
+          class="pointer-events-auto p-4 rounded-xl border backdrop-blur-md shadow-lg flex items-center gap-3 text-sm font-semibold transition-all
+            {toast.type === 'success' ? 'border-emerald-500/30 bg-emerald-950/80 text-emerald-300' :
+             toast.type === 'error' ? 'border-red-500/30 bg-red-950/80 text-red-300' :
+             'border-blue-500/30 bg-blue-950/80 text-blue-300'}"
+        >
+          <div class="flex-1">{toast.message}</div>
+        </div>
+      {/each}
     </div>
   {/if}
 </main>
