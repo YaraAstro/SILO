@@ -19,6 +19,8 @@ export type Rule = {
   schedule: string | null;
   createdAt: number;
   updatedAt: number;
+  extraLimitSeconds?: number;
+  extraLimitDate?: string | null;
 };
 
 export type BootStatus = {
@@ -58,6 +60,7 @@ export type UsageReport = {
   date: string;
   totalSeconds: number;
   apps: Array<{ name: string; seconds: number }>;
+  sites?: Array<{ name: string; seconds: number }>;
 };
 
 export type UsageTimeline = {
@@ -97,7 +100,9 @@ export const emptyRule = (): Rule => ({
   active: true,
   schedule: null,
   createdAt: 0,
-  updatedAt: 0
+  updatedAt: 0,
+  extraLimitSeconds: 0,
+  extraLimitDate: null,
 });
 
 export const siloApi = {
@@ -119,5 +124,6 @@ export const siloApi = {
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   markBackupComplete: () => invoke<Settings>("mark_backup_complete"),
   getAvailableApps: () => invoke<string[]>("get_available_apps"),
-  getNetworkHistory: (range: string) => invoke<UsageDayBytes[]>("get_network_history", { range })
+  getNetworkHistory: (range: string) => invoke<UsageDayBytes[]>("get_network_history", { range }),
+  addRuleTime: (id: number, seconds: number) => invoke<void>("add_rule_time", { id, seconds }),
 };

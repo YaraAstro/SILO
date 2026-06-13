@@ -78,6 +78,7 @@
   let rules = $state<Rule[]>([]);
   let settings = $state<Settings | null>(null);
   let usage = $state<UsageReport | null>(null);
+  let usageTab = $state<"apps" | "sites">("apps");
   let timeline = $state<UsageTimeline | null>(null);
   let dataUsage = $state<DataUsageReport | null>(null);
   let ruleDraft = $state<Rule>(emptyRule());
@@ -93,10 +94,30 @@
   let showAppDropdown = $state(false);
   let showViolationOverlay = $state(false);
   let violationData = $state<{
+    ruleId: number;
     target: string;
     ruleType: string;
     enforcement: string;
     limitSeconds: number;
+    remainingSeconds: number;
+  } | null>(null);
+
+  let showCountdownOverlay = $state(false);
+  let countdownData = $state<{
+    ruleId: number;
+    target: string;
+    remainingSeconds: number;
+    enforcement: string;
+  } | null>(null);
+
+  let showWarningOverlay = $state(false);
+  let warningData = $state<{
+    ruleId: number;
+    target: string;
+    ruleType: string;
+    enforcement: string;
+    limitSeconds: number;
+    remainingSeconds: number;
   } | null>(null);
 
   let detailRange = $state<"today" | "7d" | "30d">("today");
@@ -289,13 +310,43 @@
       .catch(() => undefined);
 
     void listen<{
+      ruleId: number;
       target: string;
       ruleType: string;
       enforcement: string;
       limitSeconds: number;
+      remainingSeconds: number;
     }>("rule_violated", (event) => {
       violationData = event.payload;
       showViolationOverlay = true;
+      showCountdownOverlay = false;
+      showWarningOverlay = false;
+    })
+      .then((unlisten) => unlisteners.push(unlisten))
+      .catch(() => undefined);
+
+    void listen<{
+      ruleId: number;
+      target: string;
+      remainingSeconds: number;
+      enforcement: string;
+    }>("rule_countdown", (event) => {
+      countdownData = event.payload;
+      showCountdownOverlay = true;
+    })
+      .then((unlisten) => unlisteners.push(unlisten))
+      .catch(() => undefined);
+
+    void listen<{
+      ruleId: number;
+      target: string;
+      ruleType: string;
+      enforcement: string;
+      limitSeconds: number;
+      remainingSeconds: number;
+    }>("rule_warning", (event) => {
+      warningData = event.payload;
+      showWarningOverlay = true;
     })
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
@@ -572,6 +623,22 @@
     if (hours > 0)
       return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
     return `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+
+  async function addTime(ruleId: number, minutes: number) {
+    try {
+      await siloApi.addRuleTime(ruleId, minutes * 60);
+      showViolationOverlay = false;
+      violationData = null;
+      showWarningOverlay = false;
+      warningData = null;
+      showCountdownOverlay = false;
+      countdownData = null;
+      showToast(`Added ${minutes} minutes for today!`, "success");
+      await loadAll();
+    } catch (error) {
+      showToast(toErrorMessage(error), "error");
+    }
   }
 
   function formatBytes(bytes: number) {
@@ -900,33 +967,82 @@
                 <RotateCcw size={15} />
               </button>
             </div>
+            <div class="mt-4 flex rounded-lg bg-slate-950 p-1">
+              <button
+                class="flex-1 rounded-md py-1.5 text-center text-xs font-semibold transition
+                  {usageTab === 'apps' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                type="button"
+                onclick={() => (usageTab = "apps")}
+              >
+                Applications
+              </button>
+              <button
+                class="flex-1 rounded-md py-1.5 text-center text-xs font-semibold transition
+                  {usageTab === 'sites' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                type="button"
+                onclick={() => (usageTab = "sites")}
+              >
+                Websites
+              </button>
+            </div>
+
             <div class="mt-5 space-y-4">
-              {#if usage?.apps.length}
-                {#each usage.apps.slice(0, 6) as app}
-                  <div>
-                    <div
-                      class="flex items-center justify-between gap-3 text-sm"
-                    >
-                      <span class="truncate font-semibold">{app.name}</span>
-                      <span class="shrink-0 text-slate-400"
-                        >{formatDuration(app.seconds)}</span
-                      >
-                    </div>
-                    <div class="mt-2 h-1.5 rounded-full bg-slate-800">
+              {#if usageTab === "apps"}
+                {#if usage?.apps.length}
+                  {#each usage.apps.slice(0, 6) as app}
+                    <div>
                       <div
-                        class="h-1.5 rounded-full bg-teal-400"
-                        style={`width: ${Math.max(4, Math.min(100, (app.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
-                      ></div>
+                        class="flex items-center justify-between gap-3 text-sm"
+                      >
+                        <span class="truncate font-semibold">{app.name}</span>
+                        <span class="shrink-0 text-slate-400"
+                          >{formatDuration(app.seconds)}</span
+                        >
+                      </div>
+                      <div class="mt-2 h-1.5 rounded-full bg-slate-800">
+                        <div
+                          class="h-1.5 rounded-full bg-teal-400"
+                          style={`width: ${Math.max(4, Math.min(100, (app.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
+                        ></div>
+                      </div>
                     </div>
-                  </div>
-                {/each}
+                  {/each}
+                {:else}
+                  <EmptyState
+                    compact
+                    icon={Monitor}
+                    title="No usage yet"
+                    message="Tracked applications will appear here."
+                  />
+                {/if}
               {:else}
-                <EmptyState
-                  compact
-                  icon={Monitor}
-                  title="No usage yet"
-                  message="Tracked applications will appear here."
-                />
+                {#if usage?.sites?.length}
+                  {#each usage.sites.slice(0, 6) as site}
+                    <div>
+                      <div
+                        class="flex items-center justify-between gap-3 text-sm"
+                      >
+                        <span class="truncate font-semibold">{site.name}</span>
+                        <span class="shrink-0 text-slate-400"
+                          >{formatDuration(site.seconds)}</span
+                        >
+                      </div>
+                      <div class="mt-2 h-1.5 rounded-full bg-slate-800">
+                        <div
+                          class="h-1.5 rounded-full bg-teal-400"
+                          style={`width: ${Math.max(4, Math.min(100, (site.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
+                        ></div>
+                      </div>
+                    </div>
+                  {/each}
+                {:else}
+                  <EmptyState
+                    compact
+                    icon={Globe}
+                    title="No usage yet"
+                    message="Tracked websites will appear here."
+                  />
+                {/if}
               {/if}
             </div>
             <div
@@ -2096,10 +2212,142 @@
     onSelect={(key) => (activeView = key as ViewKey)}
   />
 
+  {#if showWarningOverlay && warningData}
+    <div
+      transition:fade={{ duration: 200 }}
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md"
+    >
+      <div
+        transition:fly={{ y: 25, duration: 250 }}
+        class="silo-card max-w-md w-full p-8 border border-amber-500/30 bg-slate-900/90 shadow-2xl text-center space-y-6"
+      >
+        <div
+          class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 text-amber-400"
+        >
+          <CircleAlert size={32} />
+        </div>
+        <div class="space-y-2">
+          <h2 class="text-2xl font-black text-slate-100">
+            Limit Warning
+          </h2>
+          <p class="text-sm text-slate-400">
+            You have <span class="text-amber-300 font-bold">{formatDuration(warningData.remainingSeconds)}</span> remaining today for this {warningData.ruleType}.
+          </p>
+        </div>
+        <div
+          class="rounded-lg bg-slate-950/50 p-4 border border-slate-800 font-mono"
+        >
+          <span class="text-amber-300 font-bold">{warningData.target}</span>
+          <div class="text-xs text-slate-500 mt-1">
+            Total Limit: {formatDuration(warningData.limitSeconds)}
+          </div>
+        </div>
+        <div class="space-y-3">
+          <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Add time for today</p>
+          <div class="flex flex-wrap justify-center gap-2">
+            <button
+              class="silo-button-secondary bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 text-xs rounded-lg transition"
+              type="button"
+              onclick={() => warningData && addTime(warningData.ruleId, 15)}
+            >
+              +15 Min
+            </button>
+            <button
+              class="silo-button-secondary bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 text-xs rounded-lg transition"
+              type="button"
+              onclick={() => warningData && addTime(warningData.ruleId, 30)}
+            >
+              +30 Min
+            </button>
+            <button
+              class="silo-button-secondary bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 text-xs rounded-lg transition"
+              type="button"
+              onclick={() => warningData && addTime(warningData.ruleId, 60)}
+            >
+              +1 Hour
+            </button>
+          </div>
+        </div>
+        <div class="flex justify-center pt-2">
+          <button
+            class="silo-button-secondary hover:bg-slate-800 text-slate-400 font-bold px-6 py-2 rounded-lg transition"
+            type="button"
+            onclick={() => {
+              showWarningOverlay = false;
+              warningData = null;
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showCountdownOverlay && countdownData}
+    <div
+      transition:fade={{ duration: 200 }}
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-lg"
+    >
+      <div
+        transition:fly={{ y: 25, duration: 250 }}
+        class="silo-card max-w-md w-full p-8 border border-red-500/40 bg-slate-900/95 shadow-2xl text-center space-y-6"
+      >
+        <div
+          class="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-red-500/10 text-red-500 animate-pulse"
+        >
+          <span class="text-3xl font-black font-mono">{countdownData.remainingSeconds}</span>
+        </div>
+        <div class="space-y-2">
+          <h2 class="text-2xl font-black text-red-400">
+            {countdownData.enforcement === 'hard' ? 'Hard Block' : 'Limit'} Closing App
+          </h2>
+          <p class="text-sm text-slate-400">
+            Save your work immediately! The application will close.
+          </p>
+        </div>
+        <div
+          class="rounded-lg bg-slate-950/50 p-4 border border-slate-800 font-mono"
+        >
+          <span class="text-red-300 font-bold">{countdownData.target}</span>
+        </div>
+
+        {#if countdownData.enforcement === 'warn'}
+          <div class="space-y-3">
+            <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Add time for today</p>
+            <div class="flex flex-wrap justify-center gap-2">
+              <button
+                class="silo-button bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs rounded-lg transition"
+                type="button"
+                onclick={() => countdownData && addTime(countdownData.ruleId, 15)}
+              >
+                +15 Min
+              </button>
+              <button
+                class="silo-button bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs rounded-lg transition"
+                type="button"
+                onclick={() => countdownData && addTime(countdownData.ruleId, 30)}
+              >
+                +30 Min
+              </button>
+              <button
+                class="silo-button bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs rounded-lg transition"
+                type="button"
+                onclick={() => countdownData && addTime(countdownData.ruleId, 60)}
+              >
+                +1 Hour
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   {#if showViolationOverlay && violationData}
     <div
       transition:fade={{ duration: 200 }}
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md"
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md"
     >
       <div
         transition:fly={{ y: 25, duration: 250 }}
@@ -2112,10 +2360,10 @@
         </div>
         <div class="space-y-2">
           <h2 class="text-2xl font-black text-slate-100">
-            Focus Limit Reached
+            {violationData.enforcement === 'soft' ? 'Focus Limit Reached' : 'Focus Limit Reached & Closed'}
           </h2>
           <p class="text-sm text-slate-400">
-            You've set a rule restricting access to this {violationData.ruleType}.
+            You've reached the daily limit for this {violationData.ruleType}.
           </p>
         </div>
         <div
@@ -2123,10 +2371,40 @@
         >
           <span class="text-red-300 font-bold">{violationData.target}</span>
           <div class="text-xs text-slate-500 mt-1">
-            Limit: {formatDuration(violationData.limitSeconds)}
+            Daily Limit: {formatDuration(violationData.limitSeconds)}
           </div>
         </div>
-        <div class="flex justify-center gap-3">
+
+        {#if violationData.enforcement === 'warn'}
+          <div class="space-y-3">
+            <p class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Add time for today</p>
+            <div class="flex flex-wrap justify-center gap-2">
+              <button
+                class="silo-button bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs rounded-lg transition"
+                type="button"
+                onclick={() => violationData && addTime(violationData.ruleId, 15)}
+              >
+                +15 Min
+              </button>
+              <button
+                class="silo-button bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs rounded-lg transition"
+                type="button"
+                onclick={() => violationData && addTime(violationData.ruleId, 30)}
+              >
+                +30 Min
+              </button>
+              <button
+                class="silo-button bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs rounded-lg transition"
+                type="button"
+                onclick={() => violationData && addTime(violationData.ruleId, 60)}
+              >
+                +1 Hour
+              </button>
+            </div>
+          </div>
+        {/if}
+
+        <div class="flex justify-center gap-3 pt-2">
           <button
             class="silo-button bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-lg transition"
             type="button"

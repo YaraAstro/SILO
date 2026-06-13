@@ -113,7 +113,8 @@ impl Storage {
     pub fn rules(&self) -> anyhow::Result<Vec<Rule>> {
         let conn = self.connection.lock();
         let mut statement = conn.prepare(
-            "SELECT id, type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at
+            "SELECT id, type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at,
+                    COALESCE(extra_limit_seconds, 0), extra_limit_date
              FROM rules
              ORDER BY active DESC, updated_at DESC, target ASC",
         )?;
@@ -128,6 +129,8 @@ impl Storage {
                 schedule: row.get(6)?,
                 created_at: row.get(7)?,
                 updated_at: row.get(8)?,
+                extra_limit_seconds: row.get(9)?,
+                extra_limit_date: row.get(10)?,
             })
         })?;
 
@@ -144,8 +147,8 @@ impl Storage {
                 conn.execute(
                     "UPDATE rules
                      SET type = ?1, target = ?2, limit_seconds = ?3, enforcement = ?4,
-                         active = ?5, schedule = ?6, updated_at = ?7
-                     WHERE id = ?8",
+                         active = ?5, schedule = ?6, updated_at = ?7, extra_limit_seconds = ?8, extra_limit_date = ?9
+                     WHERE id = ?10",
                     params![
                         &rule.rule_type,
                         &rule.target,
@@ -154,6 +157,8 @@ impl Storage {
                         bool_to_int(rule.active),
                         &rule.schedule,
                         now,
+                        rule.extra_limit_seconds,
+                        &rule.extra_limit_date,
                         id
                     ],
                 )?;
@@ -163,8 +168,8 @@ impl Storage {
             None => {
                 conn.execute(
                     "INSERT INTO rules
-                     (type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                     (type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at, extra_limit_seconds, extra_limit_date)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         &rule.rule_type,
                         &rule.target,
@@ -173,7 +178,9 @@ impl Storage {
                         bool_to_int(rule.active),
                         &rule.schedule,
                         now,
-                        now
+                        now,
+                        rule.extra_limit_seconds,
+                        &rule.extra_limit_date
                     ],
                 )?;
                 rule.id = Some(conn.last_insert_rowid());
@@ -227,6 +234,7 @@ impl Storage {
         let conn = self.connection.lock();
         let day_start = format!("{date}T00:00:00Z");
         let day_end = format!("{date}T23:59:59Z");
+        
         let mut statement = conn.prepare(
             "SELECT app_name, COALESCE(SUM(duration_seconds), 0)
              FROM sessions
@@ -243,10 +251,26 @@ impl Storage {
         let apps = rows.collect::<Result<Vec<_>, _>>()?;
         let total_seconds = apps.iter().map(|bucket| bucket.seconds).sum();
 
+        let mut site_statement = conn.prepare(
+            "SELECT domain, COALESCE(SUM(seconds), 0)
+             FROM site_usage
+             WHERE date = ?1
+             GROUP BY domain
+             ORDER BY SUM(seconds) DESC",
+        )?;
+        let site_rows = site_statement.query_map(params![date], |row| {
+            Ok(UsageBucket {
+                name: row.get(0)?,
+                seconds: row.get(1)?,
+            })
+        })?;
+        let sites = site_rows.collect::<Result<Vec<_>, _>>()?;
+
         Ok(UsageReport {
             date: date.to_string(),
             total_seconds,
             apps,
+            sites,
         })
     }
 
@@ -332,6 +356,11 @@ impl Storage {
     fn migrate(&self) -> anyhow::Result<()> {
         let conn = self.connection.lock();
         conn.execute_batch(include_str!("../schema/001_initial.sql"))?;
+        
+        // Add optional extra_limit columns if they don't exist yet
+        let _ = conn.execute("ALTER TABLE rules ADD COLUMN extra_limit_seconds INTEGER DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE rules ADD COLUMN extra_limit_date TEXT", []);
+
         conn.execute(
             "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
             params![CURRENT_SCHEMA_VERSION, Utc::now().timestamp()],

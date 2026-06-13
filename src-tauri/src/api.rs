@@ -64,6 +64,11 @@ pub fn get_rules(state: State<'_, AppState>) -> CommandResult<Vec<Rule>> {
 #[tauri::command]
 pub fn save_rule(app: AppHandle, state: State<'_, AppState>, rule: Rule) -> CommandResult<Rule> {
     let saved = state.storage().save_rule(rule).map_err(to_command_error)?;
+    
+    // Automatically enable Focus Mode when a rule is saved
+    state.set_focus_mode(true);
+    let _ = app.emit("focus_mode_changed", FocusModePayload { enabled: true });
+
     app.emit("rules_changed", &saved)
         .map_err(to_command_error)?;
     Ok(saved)
@@ -72,9 +77,38 @@ pub fn save_rule(app: AppHandle, state: State<'_, AppState>, rule: Rule) -> Comm
 #[tauri::command]
 pub fn delete_rule(app: AppHandle, state: State<'_, AppState>, id: i64) -> CommandResult<()> {
     state.storage().delete_rule(id).map_err(to_command_error)?;
+    
+    // Automatically disable Focus Mode if no rules remain
+    let rules = state.storage().rules().map_err(to_command_error)?;
+    if rules.is_empty() {
+        state.set_focus_mode(false);
+        let _ = app.emit("focus_mode_changed", FocusModePayload { enabled: false });
+    }
+
     app.emit("rules_changed", DeletedRulePayload { id })
         .map_err(to_command_error)
 }
+
+#[tauri::command]
+pub fn add_rule_time(app: AppHandle, state: State<'_, AppState>, id: i64, seconds: i64) -> CommandResult<()> {
+    let storage = state.storage();
+    let rules = storage.rules().map_err(to_command_error)?;
+    if let Some(mut rule) = rules.into_iter().find(|r| r.id == Some(id)) {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        if rule.extra_limit_date.as_ref() == Some(&today) {
+            rule.extra_limit_seconds += seconds;
+        } else {
+            rule.extra_limit_date = Some(today);
+            rule.extra_limit_seconds = seconds;
+        }
+        let saved = storage.save_rule(rule).map_err(to_command_error)?;
+        let _ = app.emit("rules_changed", &saved);
+        Ok(())
+    } else {
+        Err("Rule not found".to_string())
+    }
+}
+
 
 #[tauri::command]
 pub fn get_usage(

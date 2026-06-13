@@ -90,6 +90,9 @@ pub struct Rule {
     pub created_at: i64,
     #[serde(default)]
     pub updated_at: i64,
+    #[serde(default)]
+    pub extra_limit_seconds: i64,
+    pub extra_limit_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +125,7 @@ pub struct UsageReport {
     pub date: String,
     pub total_seconds: i64,
     pub apps: Vec<UsageBucket>,
+    pub sites: Vec<UsageBucket>,
 }
 
 #[derive(Debug, Clone, Serialize)]
