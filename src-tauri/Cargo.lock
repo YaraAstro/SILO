@@ -3329,7 +3329,7 @@ dependencies = [
 
 [[package]]
 name = "silo"
-version = "0.1.0"
+version = "0.3.0-pre"
 dependencies = [
  "anyhow",
  "chrono",
