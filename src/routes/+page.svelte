@@ -1,5 +1,6 @@
 <script lang="ts">
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { fade, fly, slide, scale } from "svelte/transition";
   import {
@@ -3535,6 +3536,65 @@
                 </div>
               </div>
             {/each}
+          </div>
+        </section>
+
+        <section class="silo-card p-6 relative overflow-hidden">
+          <!-- Subtle gradient background glow -->
+          <div class="absolute -right-16 -top-16 w-36 h-36 bg-gradient-to-br from-teal-500/10 to-purple-500/10 rounded-full blur-2xl pointer-events-none"></div>
+          
+          <div class="flex items-center gap-3">
+            <IconBadge icon={Info} tone="teal" label="About" />
+            <h2 class="text-lg font-bold">About SILO</h2>
+          </div>
+          
+          <div class="mt-6 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+            <div class="space-y-3">
+              <div class="flex items-center gap-2">
+                <span class="text-2xl font-black bg-gradient-to-r from-teal-400 to-purple-400 bg-clip-text text-transparent">SILO</span>
+                <span class="text-xs font-mono font-bold bg-slate-800 text-teal-400 px-2 py-0.5 rounded border border-teal-500/10">v0.4.0</span>
+              </div>
+              <p class="text-sm text-slate-300 max-w-lg leading-relaxed">
+                A local-first, privacy-focused productivity and digital wellness platform. Monitor screen time, control distractions, and analyze internet usage in real-time.
+              </p>
+              <div class="text-xs text-slate-400">
+                Developed by <strong class="text-slate-200">YaraAstro</strong>
+              </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3 shrink-0 w-full md:w-auto">
+              <div class="p-3 bg-slate-950/45 border border-slate-900 rounded-lg text-center">
+                <div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Database</div>
+                <div class="text-xs text-slate-300 font-semibold mt-1">SQLite Local</div>
+              </div>
+              <div class="p-3 bg-slate-950/45 border border-slate-900 rounded-lg text-center">
+                <div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Engine</div>
+                <div class="text-xs text-slate-300 font-semibold mt-1">Rust &amp; Svelte</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mt-6 pt-5 border-t border-slate-800/60 flex flex-wrap gap-4 items-center justify-between text-xs text-slate-500">
+            <div class="flex items-center gap-2">
+              <span>Built with Tauri &amp; Win32 ETW</span>
+              <span class="text-slate-700">•</span>
+              <span>Personal Use License</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <button 
+                class="hover:text-teal-400 transition font-semibold cursor-pointer"
+                onclick={() => openUrl("https://github.com/YaraAstro/SILO")}
+              >
+                GitHub Repository
+              </button>
+              <span class="text-slate-700">•</span>
+              <button 
+                class="hover:text-teal-400 transition font-semibold cursor-pointer"
+                onclick={() => openUrl("https://github.com/YaraAstro/SILO/issues")}
+              >
+                Report Issue
+              </button>
+            </div>
           </div>
         </section>
 
