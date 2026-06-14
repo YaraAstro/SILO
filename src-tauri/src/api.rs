@@ -90,23 +90,8 @@ pub fn delete_rule(app: AppHandle, state: State<'_, AppState>, id: i64) -> Comma
 }
 
 #[tauri::command]
-pub fn add_rule_time(app: AppHandle, state: State<'_, AppState>, id: i64, seconds: i64) -> CommandResult<()> {
-    let storage = state.storage();
-    let rules = storage.rules().map_err(to_command_error)?;
-    if let Some(mut rule) = rules.into_iter().find(|r| r.id == Some(id)) {
-        let today = Utc::now().format("%Y-%m-%d").to_string();
-        if rule.extra_limit_date.as_ref() == Some(&today) {
-            rule.extra_limit_seconds += seconds;
-        } else {
-            rule.extra_limit_date = Some(today);
-            rule.extra_limit_seconds = seconds;
-        }
-        let saved = storage.save_rule(rule).map_err(to_command_error)?;
-        let _ = app.emit("rules_changed", &saved);
-        Ok(())
-    } else {
-        Err("Rule not found".to_string())
-    }
+pub fn add_rule_time(app: AppHandle, id: i64, seconds: i64) -> CommandResult<()> {
+    crate::extend_rule_limit(&app, id, seconds)
 }
 
 

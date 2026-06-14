@@ -148,7 +148,188 @@ fn minimize_active_window() {
     }
 }
 
-fn show_custom_notification(
+#[cfg(target_os = "windows")]
+fn register_custom_protocol() -> Result<(), Box<dyn std::error::Error>> {
+    use std::env::current_exe;
+    use std::process::Command;
+
+    let exe_path = current_exe()?;
+    let exe_str = exe_path.to_string_lossy().to_string();
+
+    let _ = Command::new("reg")
+        .args(&[
+            "add",
+            "HKCU\\Software\\Classes\\silo",
+            "/ve",
+            "/t",
+            "REG_SZ",
+            "/d",
+            "URL:silo Protocol",
+            "/f",
+        ])
+        .status();
+
+    let _ = Command::new("reg")
+        .args(&[
+            "add",
+            "HKCU\\Software\\Classes\\silo",
+            "/v",
+            "URL Protocol",
+            "/t",
+            "REG_SZ",
+            "/d",
+            "",
+            "/f",
+        ])
+        .status();
+
+    let cmd_val = format!("\"{}\" \"%1\"", exe_str);
+    let _ = Command::new("reg")
+        .args(&[
+            "add",
+            "HKCU\\Software\\Classes\\silo\\shell\\open\\command",
+            "/ve",
+            "/t",
+            "REG_SZ",
+            "/d",
+            &cmd_val,
+            "/f",
+        ])
+        .status();
+
+    Ok(())
+}
+
+pub fn extend_rule_limit(app: &tauri::AppHandle, id: i64, seconds: i64) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let storage = state.storage();
+    let rules = storage.rules().map_err(|e| e.to_string())?;
+    if let Some(mut rule) = rules.into_iter().find(|r| r.id == Some(id)) {
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        if rule.extra_limit_date.as_ref() == Some(&today) {
+            rule.extra_limit_seconds += seconds;
+        } else {
+            rule.extra_limit_date = Some(today);
+            rule.extra_limit_seconds = seconds;
+        }
+        let saved = storage.save_rule(rule).map_err(|e| e.to_string())?;
+        let _ = app.emit("rules_changed", &saved);
+
+        let mut rule_states = state.rule_states.lock();
+        if let Some(state) = rule_states.get_mut(&id) {
+            state.warned_5m = false;
+            state.warned_1m = false;
+            state.last_countdown_sec = None;
+            state.warned_soft_hit = false;
+        }
+        Ok(())
+    } else {
+        Err("Rule not found".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn show_native_toast(
+    rule_id: i64,
+    target: &str,
+    enforcement: &str,
+    _limit_seconds: i64,
+    remaining_seconds: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use windows::core::HSTRING;
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+
+    let title = match enforcement {
+        "hard" => {
+            if remaining_seconds <= 0 {
+                "Focus Block: Closed".to_string()
+            } else {
+                format!("Hard Block in {}s", remaining_seconds)
+            }
+        }
+        _ => {
+            if remaining_seconds <= 0 {
+                "Limit Reached".to_string()
+            } else {
+                let minutes = remaining_seconds / 60;
+                if minutes > 0 {
+                    format!("Remaining: {}m", minutes)
+                } else {
+                    format!("Remaining: {}s", remaining_seconds)
+                }
+            }
+        }
+    };
+
+    let body = match enforcement {
+        "hard" => {
+            if remaining_seconds <= 0 {
+                format!("Time limit exceeded. {} has been closed.", target)
+            } else {
+                format!("Save your work immediately! {} is closing.", target)
+            }
+        }
+        "warn" => {
+            if remaining_seconds <= 0 {
+                format!("Limit reached! Closed {}. Extend to keep using.", target)
+            } else {
+                format!("Warning: Focus limit is approaching for {}. Extend time to keep active.", target)
+            }
+        }
+        "soft" => {
+            format!("Time limit reached today. {} minimized to help you stay focused.", target)
+        }
+        _ => "".to_string(),
+    };
+
+    let actions_xml = if enforcement == "warn" {
+        format!(
+            r#"<actions>
+              <action content="+15 Min" arguments="silo://add-time/{}/{}" activationType="protocol"/>
+              <action content="+30 Min" arguments="silo://add-time/{}/{}" activationType="protocol"/>
+              <action content="+1 Hour" arguments="silo://add-time/{}/{}" activationType="protocol"/>
+            </actions>"#,
+            rule_id, 900, rule_id, 1800, rule_id, 3600
+        )
+    } else {
+        "".to_string()
+    };
+
+    let audio_xml = if remaining_seconds > 0 && remaining_seconds < 60 {
+        "<audio silent=\"true\"/>"
+    } else {
+        ""
+    };
+
+    let xml_str = format!(
+        r#"<toast>
+          <visual>
+            <binding template="ToastGeneric">
+              <text>{}</text>
+              <text>{}</text>
+            </binding>
+          </visual>
+          {}
+          {}
+        </toast>"#,
+        title, body, actions_xml, audio_xml
+    );
+
+    let doc = XmlDocument::new()?;
+    doc.LoadXml(&HSTRING::from(&xml_str))?;
+
+    let toast = ToastNotification::CreateToastNotification(&doc)?;
+    let tag = HSTRING::from(format!("rule-{}", rule_id));
+    toast.SetTag(&tag)?;
+
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from("com.yara.silo"))?;
+    notifier.Show(&toast)?;
+
+    Ok(())
+}
+
+fn trigger_native_toast(
     app_handle: &tauri::AppHandle,
     rule_id: i64,
     target: &str,
@@ -164,47 +345,37 @@ fn show_custom_notification(
         return;
     }
 
-    let target_safe = target.replace(' ', "%20");
-    let url_str = format!(
-        "/notification?ruleId={}&target={}&enforcement={}&limitSeconds={}&remainingSeconds={}",
-        rule_id, target_safe, enforcement, limit_seconds, remaining_seconds
-    );
-
-    if let Some(existing) = app_handle.get_webview_window("notification") {
-        let _ = existing.emit("update_countdown", remaining_seconds);
-        return;
-    }
-
-    let builder = tauri::WebviewWindowBuilder::new(
-        app_handle,
-        "notification",
-        tauri::WebviewUrl::App(url_str.into()),
-    )
-    .title("SILO Notification")
-    .inner_size(360.0, 180.0)
-    .resizable(false)
-    .decorations(false)
-    .always_on_top(true)
-    .transparent(true)
-    .visible(false);
-
-    if let Ok(window) = builder.build() {
-        if let Ok(Some(monitor)) = app_handle.primary_monitor() {
-            let size = monitor.size();
-            let scale_factor = monitor.scale_factor();
-            let monitor_width = (size.width as f64 / scale_factor) as i32;
-            let monitor_height = (size.height as f64 / scale_factor) as i32;
-
-            let window_width = 360;
-            let window_height = 180;
-            let x = monitor_width - window_width - 20;
-            let y = monitor_height - window_height - 60;
-
-            let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x as f64, y as f64)));
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(err) = show_native_toast(rule_id, target, enforcement, limit_seconds, remaining_seconds) {
+            tracing::error!("failed to show native toast: {:?}", err);
         }
-        let _ = window.show();
-        let _ = window.set_focus();
     }
+}
+
+fn redirect_active_tab(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let script = format!(
+            r#"$old = Get-Clipboard -Format Text -ErrorAction SilentlyContinue; Set-Clipboard -Value '{}'; $w = New-Object -ComObject WScript.Shell; $w.SendKeys('^l'); Start-Sleep -Milliseconds 100; $w.SendKeys('^v'); Start-Sleep -Milliseconds 100; $w.SendKeys('~'); Start-Sleep -Milliseconds 400; if ($old) {{ Set-Clipboard -Value $old }} else {{ Clear-Clipboard }}"#,
+            url
+        );
+        let _ = Command::new("powershell")
+            .args(&[
+                "-NoProfile",
+                "-Command",
+                &script
+            ])
+            .spawn();
+    }
+}
+
+fn ensure_blocked_html(data_dir: &std::path::Path) -> std::io::Result<()> {
+    let html_content = include_str!("blocked.html");
+    let blocked_html_path = data_dir.join("blocked.html");
+    std::fs::write(blocked_html_path, html_content)?;
+    Ok(())
 }
 
 fn check_and_enforce_rules(
@@ -212,6 +383,8 @@ fn check_and_enforce_rules(
     state: &AppState,
     active_app: &models::ActiveApp,
 ) -> anyhow::Result<()> {
+    let blocked_path = state.storage().data_dir().join("blocked.html");
+    let blocked_url = format!("file:///{}", blocked_path.to_string_lossy().replace('\\', "/"));
     let rules = state.storage().rules()?;
     let mut rule_states = state.rule_states.lock();
     let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -230,7 +403,7 @@ fn check_and_enforce_rules(
             "app" => active_app.app.to_lowercase() == rule.target.to_lowercase(),
             "site" => {
                 if let Some(ref active_site) = active_app.site {
-                    active_site.to_lowercase() == rule.target.to_lowercase()
+                    crate::monitor::normalize_domain(active_site) == crate::monitor::normalize_domain(&rule.target)
                 } else {
                     false
                 }
@@ -290,18 +463,22 @@ fn check_and_enforce_rules(
                     if remaining == 60 || remaining == 30 || remaining == 10 || remaining <= 5 {
                         if rule_state.last_countdown_sec != Some(remaining) {
                             rule_state.last_countdown_sec = Some(remaining);
-                            show_custom_notification(app_handle, rule_id, &rule.target, "hard", limit, remaining);
+                            trigger_native_toast(app_handle, rule_id, &rule.target, "hard", limit, remaining);
                         }
                     }
                 }
 
                 if matches_active && remaining <= 0 {
-                    close_target_app(active_app.pid);
+                    if rule.rule_type == "site" {
+                        redirect_active_tab(&blocked_url);
+                    } else {
+                        close_target_app(active_app.pid);
+                    }
 
                     if !rule_state.warned_soft_hit {
                         rule_state.warned_soft_hit = true;
                         
-                        show_custom_notification(app_handle, rule_id, &rule.target, "hard", limit, remaining);
+                        trigger_native_toast(app_handle, rule_id, &rule.target, "hard", limit, remaining);
 
                         let _ = app_handle.emit(
                             "rule_violated",
@@ -322,7 +499,7 @@ fn check_and_enforce_rules(
                     if remaining <= 300 && remaining > 60 && !rule_state.warned_5m {
                         rule_state.warned_5m = true;
 
-                        show_custom_notification(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
 
                         let _ = app_handle.emit(
                             "rule_warning",
@@ -340,7 +517,7 @@ fn check_and_enforce_rules(
                     if remaining <= 60 && !rule_state.warned_1m {
                         rule_state.warned_1m = true;
 
-                        show_custom_notification(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
 
                         let _ = app_handle.emit(
                             "rule_warning",
@@ -356,7 +533,10 @@ fn check_and_enforce_rules(
                     }
                     
                     if remaining <= 60 {
-                        show_custom_notification(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        if rule_state.last_countdown_sec != Some(remaining) {
+                            rule_state.last_countdown_sec = Some(remaining);
+                            trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        }
 
                         let _ = app_handle.emit(
                             "rule_countdown",
@@ -371,12 +551,16 @@ fn check_and_enforce_rules(
                 }
 
                 if matches_active && remaining <= 0 {
-                    close_target_app(active_app.pid);
+                    if rule.rule_type == "site" {
+                        redirect_active_tab(&blocked_url);
+                    } else {
+                        close_target_app(active_app.pid);
+                    }
 
                     if !rule_state.warned_soft_hit {
                         rule_state.warned_soft_hit = true;
 
-                        show_custom_notification(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
 
                         let _ = app_handle.emit(
                             "rule_violated",
@@ -405,7 +589,7 @@ fn check_and_enforce_rules(
                     if should_notify {
                         rule_state.last_soft_notification_ts = Some(now_ts);
 
-                        show_custom_notification(app_handle, rule_id, &rule.target, "soft", limit, remaining);
+                        trigger_native_toast(app_handle, rule_id, &rule.target, "soft", limit, remaining);
 
                         let _ = app_handle.emit(
                             "rule_violated",
@@ -432,6 +616,22 @@ pub fn run() {
     tracing_subscriber::fmt().with_target(false).init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(arg) = argv.get(1) {
+                if arg.starts_with("silo://add-time/") {
+                    let parts: Vec<&str> = arg.strip_prefix("silo://add-time/").unwrap().split('/').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(rule_id), Ok(seconds)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                            let _ = extend_rule_limit(app, rule_id, seconds);
+                        }
+                    }
+                }
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
@@ -441,7 +641,16 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            {
+                let _ = register_custom_protocol();
+            }
+
             let state = AppState::new()?;
+            let data_dir = state.storage().data_dir();
+            if let Err(e) = ensure_blocked_html(data_dir) {
+                tracing::error!("failed to write blocked.html: {:?}", e);
+            }
             app.manage(state);
             spawn_monitoring(app.handle().clone());
 

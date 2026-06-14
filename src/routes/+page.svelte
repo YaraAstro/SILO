@@ -1,7 +1,7 @@
 <script lang="ts">
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import { fade, fly, slide } from "svelte/transition";
+  import { fade, fly, slide, scale } from "svelte/transition";
   import {
     Activity,
     Award,
@@ -79,6 +79,8 @@
   let settings = $state<Settings | null>(null);
   let usage = $state<UsageReport | null>(null);
   let usageTab = $state<"apps" | "sites">("apps");
+  let isRefreshing = $state(false);
+  let refreshKey = $state(0);
   let timeline = $state<UsageTimeline | null>(null);
   let dataUsage = $state<DataUsageReport | null>(null);
   let ruleDraft = $state<Rule>(emptyRule());
@@ -88,10 +90,10 @@
   let savingRule = $state(false);
   let savingSettings = $state(false);
   let exporting = $state(false);
-  let errorMessage = $state("");
   let exportPath = $state("");
   let availableApps = $state<string[]>([]);
   let showAppDropdown = $state(false);
+  let showSiteDropdown = $state(false);
   let showViolationOverlay = $state(false);
   let violationData = $state<{
     ruleId: number;
@@ -123,6 +125,10 @@
   let detailRange = $state<"today" | "7d" | "30d">("today");
   let detailUsage = $state<DataUsageReport | null>(null);
   let moreModalSearch = $state("");
+  
+  let showConfirmDeleteOverlay = $state(false);
+  let ruleToDelete = $state<Rule | null>(null);
+  let showRuleForm = $state(false);
 
   let filteredMoreRows = $derived(
     (activeView === "network-apps"
@@ -365,7 +371,6 @@
 
   async function loadAll() {
     loading = true;
-    errorMessage = "";
     try {
       boot = await siloApi.handshake();
       settings = boot.settings;
@@ -379,7 +384,7 @@
         loadNetworkHistory(),
       ]);
     } catch (error) {
-      errorMessage = toErrorMessage(error);
+      showToast(toErrorMessage(error), "error");
     } finally {
       loading = false;
     }
@@ -399,13 +404,20 @@
     return availableApps.filter((app) => app.toLowerCase().includes(query));
   }
 
+  function filteredAvailableSites() {
+    const sitesList = (usage?.sites ?? []).map((s) => s.name);
+    const query = ruleDraft.target.trim().toLowerCase();
+    if (!query) return sitesList;
+    return sitesList.filter((site) => site.toLowerCase().includes(query));
+  }
+
   async function refreshLiveState() {
     await Promise.all([
       loadSnapshot(),
       loadDataUsage(dataRange),
       loadNetworkHistory(),
     ]).catch((error) => {
-      errorMessage = toErrorMessage(error);
+      showToast(toErrorMessage(error), "error");
     });
 
     const nowTime = new Date().toLocaleTimeString(undefined, {
@@ -510,10 +522,10 @@
     }
 
     savingRule = true;
-    errorMessage = "";
     try {
       await siloApi.saveRule({ ...ruleDraft, target: ruleDraft.target.trim() });
       ruleDraft = emptyRule();
+      showRuleForm = false;
       await Promise.all([loadRules(), loadSnapshot()]);
       showToast("Rule saved successfully!", "success");
     } catch (error) {
@@ -523,20 +535,60 @@
     }
   }
 
-  async function removeRule(rule: Rule) {
-    if (rule.id === null || !window.confirm(`Delete rule for ${rule.target}?`))
-      return;
+  async function toggleRuleActive(rule: Rule) {
     try {
-      await siloApi.deleteRule(rule.id);
+      const updated = { ...rule, active: !rule.active };
+      await siloApi.saveRule(updated);
       await Promise.all([loadRules(), loadSnapshot()]);
-      showToast(`Rule for ${rule.target} deleted.`, "info");
+      showToast(
+        `Rule for ${rule.target} ${updated.active ? "activated" : "paused"}.`,
+        "success",
+      );
     } catch (error) {
       showToast(toErrorMessage(error), "error");
     }
   }
 
+  function getRuleUsagePercentage(rule: Rule) {
+    const remaining = getRuleRemainingSeconds(rule);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const limit = rule.extraLimitDate === todayStr
+      ? rule.limitSeconds + (rule.extraLimitSeconds ?? 0)
+      : rule.limitSeconds;
+    if (limit <= 0) return 100;
+    const elapsed = limit - remaining;
+    return Math.max(0, Math.min(100, (elapsed / limit) * 100));
+  }
+
+  async function removeRule(rule: Rule) {
+    if (rule.id === null) return;
+    ruleToDelete = rule;
+    showConfirmDeleteOverlay = true;
+  }
+
+  async function confirmDeleteRule() {
+    if (!ruleToDelete || ruleToDelete.id === null) return;
+    const id = ruleToDelete.id;
+    const target = ruleToDelete.target;
+    showConfirmDeleteOverlay = false;
+    ruleToDelete = null;
+    try {
+      await siloApi.deleteRule(id);
+      await Promise.all([loadRules(), loadSnapshot()]);
+      showToast(`Rule for ${target} deleted.`, "info");
+    } catch (error) {
+      showToast(toErrorMessage(error), "error");
+    }
+  }
+
+  function cancelDeleteRule() {
+    showConfirmDeleteOverlay = false;
+    ruleToDelete = null;
+  }
+
   function editRule(rule: Rule) {
     ruleDraft = { ...rule };
+    showRuleForm = true;
     activeView = "rules";
   }
 
@@ -557,7 +609,6 @@
   async function saveSettings() {
     if (!settings) return;
     savingSettings = true;
-    errorMessage = "";
     try {
       settings = await siloApi.saveSettings(settings);
       if (boot) boot = { ...boot, settings };
@@ -580,7 +631,6 @@
 
   async function exportUsage() {
     exporting = true;
-    errorMessage = "";
     try {
       const result = await siloApi.exportUsageData(dataRange);
       exportPath = result.filePath;
@@ -594,7 +644,6 @@
 
   async function exportLogs() {
     exporting = true;
-    errorMessage = "";
     try {
       const result = await siloApi.exportLogs(dataRange);
       exportPath = result.filePath;
@@ -613,6 +662,149 @@
     if (hours > 0) return `${hours}h ${minutes}m`;
     if (minutes > 0) return `${minutes}m`;
     return `${safeSeconds}s`;
+  }
+
+  function cleanDomain(input: string): string {
+    if (!input) return "";
+    let cleaned = input.trim().toLowerCase();
+    
+    // Strip protocol
+    if (cleaned.startsWith("https://")) {
+      cleaned = cleaned.slice(8);
+    } else if (cleaned.startsWith("http://")) {
+      cleaned = cleaned.slice(7);
+    }
+    
+    // Strip path
+    const slashIdx = cleaned.indexOf("/");
+    if (slashIdx !== -1) {
+      cleaned = cleaned.slice(0, slashIdx);
+    }
+    
+    // Strip port
+    const colonIdx = cleaned.indexOf(":");
+    if (colonIdx !== -1) {
+      cleaned = cleaned.slice(0, colonIdx);
+    }
+    
+    // Strip www.
+    if (cleaned.startsWith("www.")) {
+      cleaned = cleaned.slice(4);
+    }
+
+    // Keywords mapping
+    if (cleaned.includes("youtube")) {
+      return "youtube.com";
+    }
+    if (cleaned.includes("github")) {
+      return "github.com";
+    }
+    if (cleaned.includes("google search") || cleaned === "google") {
+      return "google.com";
+    }
+    if (cleaned.includes("gmail")) {
+      return "gmail.com";
+    }
+    if (cleaned.includes("facebook")) {
+      return "facebook.com";
+    }
+    if (cleaned.includes("twitter") || cleaned === "x") {
+      return "x.com";
+    }
+    if (cleaned.includes("reddit")) {
+      return "reddit.com";
+    }
+    if (cleaned.includes("netflix")) {
+      return "netflix.com";
+    }
+    if (cleaned.includes("linkedin")) {
+      return "linkedin.com";
+    }
+    if (cleaned.includes("stackoverflow")) {
+      return "stackoverflow.com";
+    }
+    if (cleaned.includes("wikipedia")) {
+      return "wikipedia.org";
+    }
+    if (cleaned.includes("amazon")) {
+      return "amazon.com";
+    }
+
+    // Filter characters
+    const filtered = cleaned.replace(/[^a-z0-9.-]/g, "");
+    if (filtered.includes(".")) {
+      return filtered;
+    } else if (filtered.length > 0) {
+      return filtered + ".com";
+    }
+    return "unknown.com";
+  }
+
+  function getRuleRemainingSeconds(rule: Rule) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const limit = rule.extraLimitDate === todayStr
+      ? rule.limitSeconds + (rule.extraLimitSeconds ?? 0)
+      : rule.limitSeconds;
+
+    let elapsed = 0;
+    if (rule.ruleType === "app") {
+      const match = usage?.apps.find(
+        (a) => a.name.toLowerCase() === rule.target.toLowerCase(),
+      );
+      if (match) {
+        elapsed = match.seconds;
+      }
+      if (
+        snapshot?.activeApp &&
+        snapshot.activeApp.app.toLowerCase() === rule.target.toLowerCase()
+      ) {
+        elapsed += snapshot.activeApp.elapsedSeconds;
+      }
+    } else if (rule.ruleType === "site") {
+      const match = usage?.sites?.find(
+        (s) => cleanDomain(s.name) === cleanDomain(rule.target),
+      );
+      if (match) {
+        elapsed = match.seconds;
+      }
+      if (
+        snapshot?.activeApp?.site &&
+        cleanDomain(snapshot.activeApp.site) === cleanDomain(rule.target)
+      ) {
+        elapsed += snapshot.activeApp.elapsedSeconds;
+      }
+    }
+
+    return Math.max(0, limit - elapsed);
+  }
+
+  function getTargetRule(target: string, type: "apps" | "sites") {
+    const mappedType = type === "apps" ? "app" : "site";
+    return rules.find(
+      (r) =>
+        r.active &&
+        r.ruleType === mappedType &&
+        (mappedType === "site"
+          ? cleanDomain(r.target) === cleanDomain(target)
+          : r.target.toLowerCase() === target.toLowerCase()),
+    );
+  }
+
+  async function handleRefresh() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    try {
+      await Promise.all([
+        loadTodayUsage(),
+        loadSnapshot(),
+        new Promise((resolve) => setTimeout(resolve, 750)),
+      ]);
+      refreshKey += 1;
+    } catch (err) {
+      showToast(toErrorMessage(err), "error");
+    } finally {
+      isRefreshing = false;
+    }
   }
 
   function formatClock(seconds: number) {
@@ -758,14 +950,7 @@
   <div
     class="mx-auto min-h-screen w-full max-w-7xl px-4 pb-28 pt-8 sm:px-6 lg:px-8"
   >
-    {#if errorMessage}
-      <div
-        class="mb-5 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
-      >
-        <CircleAlert class="mt-0.5 shrink-0 text-red-300" size={18} />
-        <p>{errorMessage}</p>
-      </div>
-    {/if}
+
 
     {#if loading}
       <section class="flex min-h-[70vh] items-center justify-center">
@@ -955,16 +1140,10 @@
                 class="silo-icon-button p-1 text-slate-400 hover:text-teal-300 hover:bg-slate-800 transition rounded-lg"
                 type="button"
                 aria-label="Refresh usage"
-                onclick={async () => {
-                  errorMessage = "";
-                  try {
-                    await Promise.all([loadTodayUsage(), loadSnapshot()]);
-                  } catch (err) {
-                    errorMessage = toErrorMessage(err);
-                  }
-                }}
+                onclick={handleRefresh}
+                disabled={isRefreshing}
               >
-                <RotateCcw size={15} />
+                <RotateCcw size={15} class={isRefreshing ? "animate-spin text-teal-400" : ""} />
               </button>
             </div>
             <div class="mt-4 flex rounded-lg bg-slate-950 p-1">
@@ -986,65 +1165,132 @@
               </button>
             </div>
 
-            <div class="mt-5 space-y-4">
-              {#if usageTab === "apps"}
-                {#if usage?.apps.length}
-                  {#each usage.apps.slice(0, 6) as app}
-                    <div>
-                      <div
-                        class="flex items-center justify-between gap-3 text-sm"
-                      >
-                        <span class="truncate font-semibold">{app.name}</span>
-                        <span class="shrink-0 text-slate-400"
-                          >{formatDuration(app.seconds)}</span
-                        >
+            {#key refreshKey}
+              <div 
+                in:scale={{ duration: 400, start: 0.98, opacity: 0 }}
+                class="mt-5 flex flex-col gap-2.5"
+              >
+                {#if usageTab === "apps"}
+                  {#if usage?.apps.length}
+                    {#each usage.apps.slice(0, 6) as app}
+                      {@const targetRule = getTargetRule(app.name, usageTab)}
+                      <div class="silo-card p-3 flex items-center justify-between gap-4 bg-slate-900/30 hover:border-slate-700/80 transition-colors">
+                        <!-- Leading: Icon & Name -->
+                        <div class="flex items-center gap-3 min-w-0">
+                          <IconBadge
+                            icon={Monitor}
+                            tone="purple"
+                            label={app.name}
+                            size="md"
+                          />
+                          <div class="min-w-0">
+                            <span class="truncate font-bold text-sm text-slate-200 block" title={app.name}>
+                              {app.name}
+                            </span>
+                            {#if targetRule}
+                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                                Limit: {formatDuration(targetRule.limitSeconds)}
+                              </span>
+                            {:else}
+                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                                {((app.seconds / Math.max(1, usage.totalSeconds)) * 100).toFixed(0)}% of today's focus
+                              </span>
+                            {/if}
+                          </div>
+                        </div>
+
+                        <!-- Trailing: Duration & Warning Tier Badge -->
+                        <div class="flex items-center gap-3 shrink-0">
+                          <span class="text-sm font-black text-slate-100 font-mono">
+                            {formatDuration(app.seconds)}
+                          </span>
+                          
+                          {#if targetRule}
+                            {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
+                            <span class="text-[10px] font-black px-2.5 py-1 rounded-full border 
+                              {remainingSecs <= 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                               remainingSecs <= 60 ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
+                               remainingSecs <= 300 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                               'bg-teal-500/10 text-teal-300 border-teal-500/20'}">
+                              {remainingSecs <= 0 ? 'Blocked' :
+                               remainingSecs <= 60 ? 'Critical' :
+                               remainingSecs <= 300 ? 'Warning' :
+                               'Healthy'} ({formatDuration(remainingSecs)} left)
+                            </span>
+                          {/if}
+                        </div>
                       </div>
-                      <div class="mt-2 h-1.5 rounded-full bg-slate-800">
-                        <div
-                          class="h-1.5 rounded-full bg-teal-400"
-                          style={`width: ${Math.max(4, Math.min(100, (app.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
-                        ></div>
-                      </div>
-                    </div>
-                  {/each}
+                    {/each}
+                  {:else}
+                    <EmptyState
+                      compact
+                      icon={Monitor}
+                      title="No usage yet"
+                      message="Tracked applications will appear here."
+                    />
+                  {/if}
                 {:else}
-                  <EmptyState
-                    compact
-                    icon={Monitor}
-                    title="No usage yet"
-                    message="Tracked applications will appear here."
-                  />
-                {/if}
-              {:else}
-                {#if usage?.sites?.length}
-                  {#each usage.sites.slice(0, 6) as site}
-                    <div>
-                      <div
-                        class="flex items-center justify-between gap-3 text-sm"
-                      >
-                        <span class="truncate font-semibold">{site.name}</span>
-                        <span class="shrink-0 text-slate-400"
-                          >{formatDuration(site.seconds)}</span
-                        >
+                  {#if usage?.sites?.length}
+                    {#each usage.sites.slice(0, 6) as site}
+                      {@const targetRule = getTargetRule(site.name, usageTab)}
+                      <div class="silo-card p-3 flex items-center justify-between gap-4 bg-slate-900/30 hover:border-slate-700/80 transition-colors">
+                        <!-- Leading: Icon & Name -->
+                        <div class="flex items-center gap-3 min-w-0">
+                          <IconBadge
+                            icon={Globe}
+                            tone="teal"
+                            label={site.name}
+                            size="md"
+                          />
+                          <div class="min-w-0">
+                            <span class="truncate font-bold text-sm text-slate-200 block" title={site.name}>
+                              {site.name}
+                            </span>
+                            {#if targetRule}
+                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                                Limit: {formatDuration(targetRule.limitSeconds)}
+                              </span>
+                            {:else}
+                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                                {((site.seconds / Math.max(1, usage.totalSeconds)) * 100).toFixed(0)}% of today's focus
+                              </span>
+                            {/if}
+                          </div>
+                        </div>
+
+                        <!-- Trailing: Duration & Warning Tier Badge -->
+                        <div class="flex items-center gap-3 shrink-0">
+                          <span class="text-sm font-black text-slate-100 font-mono">
+                            {formatDuration(site.seconds)}
+                          </span>
+                          
+                          {#if targetRule}
+                            {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
+                            <span class="text-[10px] font-black px-2.5 py-1 rounded-full border 
+                              {remainingSecs <= 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                               remainingSecs <= 60 ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
+                               remainingSecs <= 300 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                               'bg-teal-500/10 text-teal-300 border-teal-500/20'}">
+                              {remainingSecs <= 0 ? 'Blocked' :
+                               remainingSecs <= 60 ? 'Critical' :
+                               remainingSecs <= 300 ? 'Warning' :
+                               'Healthy'} ({formatDuration(remainingSecs)} left)
+                            </span>
+                          {/if}
+                        </div>
                       </div>
-                      <div class="mt-2 h-1.5 rounded-full bg-slate-800">
-                        <div
-                          class="h-1.5 rounded-full bg-teal-400"
-                          style={`width: ${Math.max(4, Math.min(100, (site.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
-                        ></div>
-                      </div>
-                    </div>
-                  {/each}
-                {:else}
-                  <EmptyState
-                    compact
-                    icon={Globe}
-                    title="No usage yet"
-                    message="Tracked websites will appear here."
-                  />
+                    {/each}
+                  {:else}
+                    <EmptyState
+                      compact
+                      icon={Globe}
+                      title="No usage yet"
+                      message="Tracked websites will appear here."
+                    />
+                  {/if}
                 {/if}
-              {/if}
-            </div>
+              </div>
+            {/key}
             <div
               class="mt-6 border-t border-slate-800 pt-4 text-right text-xl font-black text-teal-300"
             >
@@ -1065,122 +1311,171 @@
             </p>
           </div>
           <button
-            class="silo-button"
+            class="silo-button flex items-center gap-2"
             type="button"
-            onclick={() => (ruleDraft = emptyRule())}
+            onclick={() => {
+              if (showRuleForm) {
+                showRuleForm = false;
+                ruleDraft = emptyRule();
+              } else {
+                ruleDraft = emptyRule();
+                showRuleForm = true;
+              }
+            }}
           >
-            <Plus size={18} />
-            Add Rule
+            {#if showRuleForm}
+              <RotateCcw size={18} />
+              Cancel / Close
+            {:else}
+              <Plus size={18} />
+              New Limit Rule
+            {/if}
           </button>
         </header>
 
-        <section class="silo-card p-5">
-          <div class="grid gap-4 lg:grid-cols-[1fr_170px_150px_110px]">
-            <label class="text-sm font-semibold text-slate-300 relative">
-              Target
-              {#if ruleDraft.ruleType === "app"}
-                <input
-                  class="silo-input mt-2"
-                  placeholder="chrome.exe"
-                  bind:value={ruleDraft.target}
-                  onfocus={() => {
-                    showAppDropdown = true;
-                    void loadAvailableApps();
-                  }}
-                  onblur={() => (showAppDropdown = false)}
-                />
-                {#if showAppDropdown && filteredAvailableApps().length}
-                  <div
-                    transition:slide={{ duration: 150 }}
-                    class="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-xl scrollbar-thin scrollbar-thumb-slate-700"
-                  >
-                    {#each filteredAvailableApps() as app}
-                      <button
-                        type="button"
-                        class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors"
-                        onmousedown={(e) => {
-                          e.preventDefault();
-                          ruleDraft.target = app;
-                          showAppDropdown = false;
-                        }}
+        {#if showRuleForm}
+          <div transition:slide={{ duration: 250 }}>
+            <section class="silo-card p-6 border border-teal-500/25 bg-slate-900/60 shadow-xl relative overflow-hidden">
+              <div class="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 blur-3xl rounded-full pointer-events-none"></div>
+              
+              <h2 class="text-lg font-bold mb-4 flex items-center gap-2 text-teal-300">
+                <Sparkles size={18} />
+                {ruleDraft.id ? 'Modify Limit Rule' : 'Create New Limit Rule'}
+              </h2>
+
+              <div class="grid gap-4 lg:grid-cols-[1fr_170px_150px_110px]">
+                <label class="text-sm font-semibold text-slate-300 relative">
+                  Target (App or Website Domain)
+                  {#if ruleDraft.ruleType === "app"}
+                    <input
+                      class="silo-input mt-2 border-slate-700 focus:border-teal-500 focus:ring-1 focus:ring-teal-500/35 transition"
+                      placeholder="chrome.exe"
+                      bind:value={ruleDraft.target}
+                      onfocus={() => {
+                        showAppDropdown = true;
+                        void loadAvailableApps();
+                      }}
+                      onblur={() => (showAppDropdown = false)}
+                    />
+                    {#if showAppDropdown && filteredAvailableApps().length}
+                      <div
+                        transition:slide={{ duration: 150 }}
+                        class="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-xl scrollbar-thin scrollbar-thumb-slate-700"
                       >
-                        {app}
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-              {:else}
-                <input
-                  class="silo-input mt-2"
-                  placeholder="youtube.com"
-                  bind:value={ruleDraft.target}
-                />
-              {/if}
-            </label>
-            <label class="text-sm font-semibold text-slate-300">
-              Type
-              <select class="silo-input mt-2" bind:value={ruleDraft.ruleType}>
-                <option value="app">App</option>
-                <option value="site">Site</option>
-              </select>
-            </label>
-            <label class="text-sm font-semibold text-slate-300">
-              Enforcement
-              <select
-                class="silo-input mt-2"
-                bind:value={ruleDraft.enforcement}
-              >
-                <option value="soft">Soft Warning</option>
-                <option value="hard">Hard Block</option>
-                <option value="warn">Warning</option>
-              </select>
-            </label>
-            <label class="text-sm font-semibold text-slate-300">
-              Minutes
-              <input
-                class="silo-input mt-2"
-                min="0"
-                type="number"
-                value={Math.round(ruleDraft.limitSeconds / 60)}
-                oninput={(event) =>
-                  (ruleDraft.limitSeconds =
-                    Number((event.currentTarget as HTMLInputElement).value) *
-                    60)}
-              />
-            </label>
+                        {#each filteredAvailableApps() as app}
+                          <button
+                            type="button"
+                            class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors"
+                            onmousedown={(e) => {
+                              e.preventDefault();
+                              ruleDraft.target = app;
+                              showAppDropdown = false;
+                            }}
+                          >
+                            {app}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  {:else}
+                    <input
+                      class="silo-input mt-2 border-slate-700 focus:border-teal-500 focus:ring-1 focus:ring-teal-500/35 transition"
+                      placeholder="youtube.com"
+                      bind:value={ruleDraft.target}
+                      onfocus={() => (showSiteDropdown = true)}
+                      onblur={() => (showSiteDropdown = false)}
+                    />
+                    {#if showSiteDropdown && filteredAvailableSites().length}
+                      <div
+                        transition:slide={{ duration: 150 }}
+                        class="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 shadow-xl scrollbar-thin scrollbar-thumb-slate-700"
+                      >
+                        {#each filteredAvailableSites() as site}
+                          <button
+                            type="button"
+                            class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors"
+                            onmousedown={(e) => {
+                              e.preventDefault();
+                              ruleDraft.target = site;
+                              showSiteDropdown = false;
+                            }}
+                          >
+                            {site}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  {/if}
+                </label>
+                <label class="text-sm font-semibold text-slate-300">
+                  Type
+                  <select class="silo-input mt-2 border-slate-700" bind:value={ruleDraft.ruleType}>
+                    <option value="app">App</option>
+                    <option value="site">Site</option>
+                  </select>
+                </label>
+                <label class="text-sm font-semibold text-slate-300">
+                  Enforcement
+                  <select
+                    class="silo-input mt-2 border-slate-700"
+                    bind:value={ruleDraft.enforcement}
+                  >
+                    <option value="soft">Soft Warning</option>
+                    <option value="hard">Hard Block</option>
+                    <option value="warn">Warning</option>
+                  </select>
+                </label>
+                <label class="text-sm font-semibold text-slate-300">
+                  Minutes
+                  <input
+                    class="silo-input mt-2 border-slate-700"
+                    min="0"
+                    type="number"
+                    value={Math.round(ruleDraft.limitSeconds / 60)}
+                    oninput={(event) =>
+                      (ruleDraft.limitSeconds =
+                        Number((event.currentTarget as HTMLInputElement).value) *
+                        60)}
+                  />
+                </label>
+              </div>
+              <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80 pt-4">
+                <label
+                  class="inline-flex items-center gap-3 text-sm font-semibold text-slate-300"
+                >
+                  <input
+                    class="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-teal-400"
+                    type="checkbox"
+                    bind:checked={ruleDraft.active}
+                  />
+                  Active rule immediately
+                </label>
+                <div class="flex gap-2">
+                  <button
+                    class="silo-button-secondary bg-slate-800 hover:bg-slate-700"
+                    type="button"
+                    onclick={() => {
+                      ruleDraft = emptyRule();
+                      showRuleForm = false;
+                    }}>Clear &amp; Close</button
+                  >
+                  <button
+                    class="silo-button"
+                    type="button"
+                    onclick={saveRule}
+                    disabled={savingRule}
+                  >
+                    {savingRule
+                      ? "Saving"
+                      : ruleDraft.id
+                        ? "Save Rule"
+                        : "Add Rule"}
+                  </button>
+                </div>
+              </div>
+            </section>
           </div>
-          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <label
-              class="inline-flex items-center gap-3 text-sm font-semibold text-slate-300"
-            >
-              <input
-                class="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-teal-400"
-                type="checkbox"
-                bind:checked={ruleDraft.active}
-              />
-              Active rule
-            </label>
-            <div class="flex gap-2">
-              <button
-                class="silo-button-secondary"
-                type="button"
-                onclick={() => (ruleDraft = emptyRule())}>Clear</button
-              >
-              <button
-                class="silo-button"
-                type="button"
-                onclick={saveRule}
-                disabled={savingRule}
-              >
-                {savingRule
-                  ? "Saving"
-                  : ruleDraft.id
-                    ? "Save Rule"
-                    : "Add Rule"}
-              </button>
-            </div>
-          </div>
-        </section>
+        {/if}
 
         <div class="relative max-w-md">
           <Search
@@ -1196,61 +1491,128 @@
 
         <section class="space-y-4">
           {#if filteredRules().length}
-            {#each filteredRules() as rule}
-              <article class="silo-card flex items-center gap-4 p-5">
-                <IconBadge
-                  icon={rule.ruleType === "site" ? Globe : Monitor}
-                  tone={rule.ruleType === "site" ? "teal" : "purple"}
-                  label={rule.ruleType}
-                  size="lg"
-                />
-                <div class="min-w-0 flex-1">
-                  <h2 class="truncate text-xl font-bold">{rule.target}</h2>
-                  <div
-                    class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-400"
-                  >
-                    <span class="flex items-center gap-1"
-                      ><Clock size={14} />
-                      {formatDuration(rule.limitSeconds)} daily</span
-                    >
-                    <span
-                      class="rounded-md px-2 py-1 text-xs font-semibold {rule.enforcement ===
-                      'hard'
-                        ? 'bg-red-500/15 text-red-300'
-                        : rule.enforcement === 'soft'
-                          ? 'bg-amber-500/15 text-amber-300'
-                          : 'bg-blue-500/15 text-blue-300'}"
-                    >
-                      {rule.enforcement === "hard"
-                        ? "Hard Block"
-                        : rule.enforcement === "soft"
-                          ? "Soft Warning"
-                          : "Warning"}
-                    </span>
-                    <span
-                      class={rule.active
-                        ? "text-emerald-300"
-                        : "text-slate-500"}
-                      >{rule.active ? "Active" : "Paused"}</span
-                    >
+            {#each filteredRules() as rule (rule.id ?? rule.target)}
+              <article 
+                class="silo-card p-6 flex flex-col gap-4 border border-slate-800 hover:border-slate-700 bg-slate-900/40 hover:bg-slate-900/60 transition-all duration-300 relative group overflow-hidden"
+                transition:slide={{ duration: 200 }}
+              >
+                {#if rule.active}
+                  <div class="absolute top-0 left-0 w-[4px] h-full bg-gradient-to-b from-teal-400 to-teal-600"></div>
+                {:else}
+                  <div class="absolute top-0 left-0 w-[4px] h-full bg-slate-700"></div>
+                {/if}
+
+                <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div class="flex items-center gap-4 min-w-0">
+                    <IconBadge
+                      icon={rule.ruleType === "site" ? Globe : Monitor}
+                      tone={rule.ruleType === "site" ? "teal" : "purple"}
+                      label={rule.ruleType}
+                      size="lg"
+                    />
+                    <div class="min-w-0">
+                      <h2 class="truncate text-xl font-black text-slate-100 flex items-center gap-2.5">
+                        {rule.target}
+                        <span class="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full border border-slate-800 bg-slate-950 text-slate-400">
+                          {rule.ruleType}
+                        </span>
+                      </h2>
+                      
+                      <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400 font-semibold">
+                        <span class="flex items-center gap-1.5">
+                          <Clock size={13} class="text-slate-500" />
+                          Limit: {formatDuration(rule.limitSeconds)} daily
+                        </span>
+                        <span class="flex items-center gap-1.5 text-teal-400">
+                          <Timer size={13} class="text-teal-400" />
+                          Remaining: {formatDuration(getRuleRemainingSeconds(rule))}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Toggle & Action Buttons -->
+                  <div class="flex items-center justify-between gap-4 md:justify-end md:shrink-0 mt-2 md:mt-0">
+                    <!-- Active Switch -->
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-bold uppercase tracking-wider {rule.active ? 'text-teal-400' : 'text-slate-500'}">
+                        {rule.active ? 'Active' : 'Paused'}
+                      </span>
+                      <ToggleSwitch checked={rule.active} label="Active state" onchange={() => toggleRuleActive(rule)} />
+                    </div>
+
+                    <!-- Actions Divider -->
+                    <div class="hidden md:block h-6 w-[1px] bg-slate-800"></div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex items-center gap-1">
+                      <button
+                        class="silo-icon-button p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 rounded-lg transition"
+                        type="button"
+                        aria-label={`Edit ${rule.target}`}
+                        onclick={() => editRule(rule)}
+                      >
+                        <Info size={16} />
+                      </button>
+                      <button
+                        class="silo-icon-button p-2 text-red-400 hover:text-red-300 hover:bg-red-950/45 rounded-lg transition"
+                        type="button"
+                        aria-label={`Delete ${rule.target}`}
+                        onclick={() => removeRule(rule)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <button
-                  class="silo-icon-button"
-                  type="button"
-                  aria-label={`Edit ${rule.target}`}
-                  onclick={() => editRule(rule)}
-                >
-                  <Info size={18} />
-                </button>
-                <button
-                  class="silo-icon-button text-red-300 hover:bg-red-500/10"
-                  type="button"
-                  aria-label={`Delete ${rule.target}`}
-                  onclick={() => removeRule(rule)}
-                >
-                  <Trash2 size={18} />
-                </button>
+
+                <!-- Progress Bar & Enforcement Badge -->
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-2 pt-2 border-t border-slate-800/40">
+                  <!-- Progress slider -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between text-xs font-semibold mb-1 text-slate-400">
+                      <span>Usage Limit</span>
+                      <span>{Math.round(getRuleUsagePercentage(rule))}% used</span>
+                    </div>
+                    <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-900">
+                      <div 
+                        class="h-full rounded-full transition-all duration-300
+                          {getRuleUsagePercentage(rule) >= 90 
+                            ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' 
+                            : getRuleUsagePercentage(rule) >= 70 
+                              ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' 
+                              : 'bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.5)]'
+                          }" 
+                        style={`width: ${getRuleUsagePercentage(rule)}%`}
+                      ></div>
+                    </div>
+                  </div>
+
+                  <!-- Enforcement Badge -->
+                  <div class="shrink-0 flex items-center md:pl-6 self-start md:self-auto mt-2 md:mt-0">
+                    <span
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider border
+                        {rule.enforcement === 'hard'
+                          ? 'bg-red-500/10 border-red-500/20 text-red-300'
+                          : rule.enforcement === 'soft'
+                            ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                            : 'bg-blue-500/10 border-blue-500/20 text-blue-300'}"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full 
+                        {rule.enforcement === 'hard' 
+                          ? 'bg-red-400 animate-pulse' 
+                          : rule.enforcement === 'soft' 
+                            ? 'bg-amber-400' 
+                            : 'bg-blue-400'}"
+                      ></span>
+                      {rule.enforcement === 'hard'
+                        ? 'Hard Block'
+                        : rule.enforcement === 'soft'
+                          ? 'Soft Warning'
+                          : 'Warning'}
+                    </span>
+                  </div>
+                </div>
               </article>
             {/each}
           {:else}
@@ -2414,6 +2776,54 @@
             }}
           >
             Acknowledge
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showConfirmDeleteOverlay && ruleToDelete}
+    <div
+      transition:fade={{ duration: 200 }}
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md"
+    >
+      <div
+        transition:fly={{ y: 25, duration: 250 }}
+        class="silo-card max-w-md w-full p-8 border border-red-500/30 bg-slate-900/90 shadow-2xl text-center space-y-6"
+      >
+        <div
+          class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 text-red-400"
+        >
+          <Trash2 size={32} />
+        </div>
+        <div class="space-y-2">
+          <h2 class="text-2xl font-black text-slate-100">
+            Delete Rule
+          </h2>
+          <p class="text-sm text-slate-400">
+            Are you sure you want to delete the rule for this {ruleToDelete.ruleType}?
+          </p>
+        </div>
+        <div
+          class="rounded-lg bg-slate-950/50 p-4 border border-slate-800 font-mono"
+        >
+          <span class="text-red-300 font-bold">{ruleToDelete.target}</span>
+        </div>
+
+        <div class="flex justify-center gap-3 pt-2">
+          <button
+            class="silo-button-secondary bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-6 py-2.5 rounded-lg transition"
+            type="button"
+            onclick={cancelDeleteRule}
+          >
+            Cancel
+          </button>
+          <button
+            class="silo-button bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-lg transition"
+            type="button"
+            onclick={confirmDeleteRule}
+          >
+            Delete
           </button>
         </div>
       </div>

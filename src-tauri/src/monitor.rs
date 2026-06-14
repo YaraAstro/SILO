@@ -201,6 +201,70 @@ mod platform {
     }
 }
 
+pub fn normalize_domain(input: &str) -> String {
+    let mut cleaned = input.trim().to_lowercase();
+    
+    // Strip protocol
+    if cleaned.starts_with("https://") {
+        cleaned = cleaned["https://".len()..].to_string();
+    } else if cleaned.starts_with("http://") {
+        cleaned = cleaned["http://".len()..].to_string();
+    }
+    
+    // Strip credentials and path/query/fragment
+    if let Some(idx) = cleaned.find('/') {
+        cleaned = cleaned[..idx].to_string();
+    }
+    
+    // Strip port
+    if let Some(idx) = cleaned.find(':') {
+        cleaned = cleaned[..idx].to_string();
+    }
+    
+    // Strip www. prefix
+    if cleaned.starts_with("www.") {
+        cleaned = cleaned["www.".len()..].to_string();
+    }
+
+    if cleaned.contains("youtube") {
+        "youtube.com".to_string()
+    } else if cleaned.contains("github") {
+        "github.com".to_string()
+    } else if cleaned.contains("google search") || cleaned == "google" {
+        "google.com".to_string()
+    } else if cleaned.contains("gmail") {
+        "gmail.com".to_string()
+    } else if cleaned.contains("facebook") {
+        "facebook.com".to_string()
+    } else if cleaned.contains("twitter") || cleaned == "x" {
+        "x.com".to_string()
+    } else if cleaned.contains("reddit") {
+        "reddit.com".to_string()
+    } else if cleaned.contains("netflix") {
+        "netflix.com".to_string()
+    } else if cleaned.contains("linkedin") {
+        "linkedin.com".to_string()
+    } else if cleaned.contains("stackoverflow") {
+        "stackoverflow.com".to_string()
+    } else if cleaned.contains("wikipedia") {
+        "wikipedia.org".to_string()
+    } else if cleaned.contains("amazon") {
+        "amazon.com".to_string()
+    } else {
+        let filtered: String = cleaned
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-')
+            .collect();
+        if filtered.contains('.') {
+            filtered
+        } else if !filtered.is_empty() {
+            format!("{}.com", filtered)
+        } else {
+            "unknown.com".to_string()
+        }
+    }
+}
+
 pub fn extract_browser_site(app_name: &str, window_title: &str) -> Option<String> {
     let app_lower = app_name.to_lowercase();
     let is_browser = app_lower.contains("chrome")
@@ -244,44 +308,5 @@ pub fn extract_browser_site(app_name: &str, window_title: &str) -> Option<String
         }
     }
 
-    let site_lower = site_name.to_lowercase();
-    let domain = if site_lower.contains("youtube") {
-        "youtube.com".to_string()
-    } else if site_lower.contains("github") {
-        "github.com".to_string()
-    } else if site_lower.contains("google search") || site_lower == "google" {
-        "google.com".to_string()
-    } else if site_lower.contains("gmail") {
-        "gmail.com".to_string()
-    } else if site_lower.contains("facebook") {
-        "facebook.com".to_string()
-    } else if site_lower.contains("twitter") || site_lower == "x" {
-        "x.com".to_string()
-    } else if site_lower.contains("reddit") {
-        "reddit.com".to_string()
-    } else if site_lower.contains("netflix") {
-        "netflix.com".to_string()
-    } else if site_lower.contains("linkedin") {
-        "linkedin.com".to_string()
-    } else if site_lower.contains("stackoverflow") {
-        "stackoverflow.com".to_string()
-    } else if site_lower.contains("wikipedia") {
-        "wikipedia.org".to_string()
-    } else if site_lower.contains("amazon") {
-        "amazon.com".to_string()
-    } else {
-        let cleaned: String = site_lower
-            .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-')
-            .collect();
-        if cleaned.contains('.') {
-            cleaned
-        } else if !cleaned.is_empty() {
-            format!("{}.com", cleaned)
-        } else {
-            "unknown.com".to_string()
-        }
-    };
-
-    Some(domain)
+    Some(normalize_domain(&site_name))
 }

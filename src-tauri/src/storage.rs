@@ -54,6 +54,10 @@ impl Storage {
             .is_ok()
     }
 
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
+    }
+
     pub fn settings(&self) -> anyhow::Result<Settings> {
         let conn = self.connection.lock();
         let mut settings = Settings::default();
@@ -413,11 +417,12 @@ impl Storage {
     }
 
     pub fn track_site_time(&self, domain: &str, seconds: i64) -> anyhow::Result<()> {
+        let normalized = crate::monitor::normalize_domain(domain);
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
         let exists: Option<i64> = conn.query_row(
             "SELECT id FROM site_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
-            params![domain, today],
+            params![normalized, today],
             |row| row.get(0),
         ).optional()?;
 
@@ -431,7 +436,7 @@ impl Storage {
             None => {
                 conn.execute(
                     "INSERT INTO site_usage (domain, date, seconds) VALUES (?1, ?2, ?3)",
-                    params![domain, today, seconds],
+                    params![normalized, today, seconds],
                 )?;
             }
         }
@@ -439,11 +444,12 @@ impl Storage {
     }
 
     pub fn today_site_seconds(&self, domain: &str) -> anyhow::Result<i64> {
+        let normalized = crate::monitor::normalize_domain(domain);
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
         let seconds: Option<i64> = conn.query_row(
             "SELECT seconds FROM site_usage WHERE domain = ?1 AND date = ?2",
-            params![domain, today],
+            params![normalized, today],
             |row| row.get(0),
         ).optional()?;
         Ok(seconds.unwrap_or(0))
@@ -491,11 +497,12 @@ impl Storage {
     }
 
     pub fn track_site_data_usage(&self, domain: &str, upload_bytes: i64, download_bytes: i64) -> anyhow::Result<()> {
+        let normalized = crate::monitor::normalize_domain(domain);
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
         let exists: Option<i64> = conn.query_row(
             "SELECT id FROM site_data_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
-            params![domain, today],
+            params![normalized, today],
             |row| row.get(0),
         ).optional()?;
 
@@ -509,7 +516,7 @@ impl Storage {
             None => {
                 conn.execute(
                     "INSERT INTO site_data_usage (domain, date, upload_bytes, download_bytes) VALUES (?1, ?2, ?3, ?4)",
-                    params![domain, today, upload_bytes, download_bytes],
+                    params![normalized, today, upload_bytes, download_bytes],
                 )?;
             }
         }
@@ -636,14 +643,18 @@ fn normalize_rule(rule: &mut Rule) -> anyhow::Result<()> {
         anyhow::bail!("enforcement must be soft, hard, or warn");
     }
 
-    let target = rule.target.trim();
+    let mut target = rule.target.trim().to_string();
     if target.is_empty() {
         anyhow::bail!("target is required");
     }
 
+    if rule_type == "site" {
+        target = crate::monitor::normalize_domain(&target);
+    }
+
     rule.rule_type = rule_type;
     rule.enforcement = enforcement;
-    rule.target = target.to_string();
+    rule.target = target;
     rule.limit_seconds = rule.limit_seconds.max(0);
     Ok(())
 }
