@@ -125,13 +125,13 @@ impl NetworkMonitor {
 
         let download_bytes = inner
             .networks
-            .iter()
-            .map(|(_, data)| data.received())
+            .values()
+            .map(|data| data.received())
             .sum::<u64>();
         let upload_bytes = inner
             .networks
-            .iter()
-            .map(|(_, data)| data.transmitted())
+            .values()
+            .map(|data| data.transmitted())
             .sum::<u64>();
 
         let speed = NetworkSpeed {
@@ -203,24 +203,24 @@ mod platform {
 
 pub fn normalize_domain(input: &str) -> String {
     let mut cleaned = input.trim().to_lowercase();
-    
+
     // Strip protocol
     if cleaned.starts_with("https://") {
         cleaned = cleaned["https://".len()..].to_string();
     } else if cleaned.starts_with("http://") {
         cleaned = cleaned["http://".len()..].to_string();
     }
-    
+
     // Strip credentials and path/query/fragment
     if let Some(idx) = cleaned.find('/') {
         cleaned = cleaned[..idx].to_string();
     }
-    
+
     // Strip port
     if let Some(idx) = cleaned.find(':') {
         cleaned = cleaned[..idx].to_string();
     }
-    
+
     // Strip www. prefix
     if cleaned.starts_with("www.") {
         cleaned = cleaned["www.".len()..].to_string();

@@ -1,6 +1,6 @@
 use crate::models::{
     CompletedSession, DataConsumer, DataUsageReport, Rule, RulesSummary, Settings, UsageBucket,
-    UsageDay, UsageReport, UsageTimeline, UsageDayBytes,
+    UsageDay, UsageDayBytes, UsageReport, UsageTimeline,
 };
 use anyhow::Context;
 use chrono::{Duration, Utc};
@@ -246,7 +246,7 @@ impl Storage {
         let conn = self.connection.lock();
         let day_start = format!("{date}T00:00:00Z");
         let day_end = format!("{date}T23:59:59Z");
-        
+
         let mut statement = conn.prepare(
             "SELECT app_name, COALESCE(SUM(duration_seconds), 0)
              FROM sessions
@@ -295,10 +295,14 @@ impl Storage {
             _ => 30,
         };
         let start_date = Utc::now().date_naive() - Duration::days(days - 1);
-        let start_ts = start_date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+        let start_ts = start_date
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
 
         let conn = self.connection.lock();
-        
+
         let mut statement = conn.prepare(
             "SELECT app_name, COALESCE(SUM(duration_seconds), 0)
              FROM sessions
@@ -420,9 +424,12 @@ impl Storage {
     fn migrate(&self) -> anyhow::Result<()> {
         let conn = self.connection.lock();
         conn.execute_batch(include_str!("../schema/001_initial.sql"))?;
-        
+
         // Add optional extra_limit columns if they don't exist yet
-        let _ = conn.execute("ALTER TABLE rules ADD COLUMN extra_limit_seconds INTEGER DEFAULT 0", []);
+        let _ = conn.execute(
+            "ALTER TABLE rules ADD COLUMN extra_limit_seconds INTEGER DEFAULT 0",
+            [],
+        );
         let _ = conn.execute("ALTER TABLE rules ADD COLUMN extra_limit_date TEXT", []);
 
         conn.execute(
@@ -466,16 +473,14 @@ impl Storage {
             "SELECT DISTINCT app_name FROM sessions 
              UNION 
              SELECT DISTINCT app_name FROM app_data_usage 
-             ORDER BY app_name ASC"
+             ORDER BY app_name ASC",
         )?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut apps = Vec::new();
-        for app in rows {
-            if let Ok(app) = app {
-                let trimmed = app.trim();
-                if !trimmed.is_empty() {
-                    apps.push(trimmed.to_string());
-                }
+        for app in rows.flatten() {
+            let trimmed = app.trim();
+            if !trimmed.is_empty() {
+                apps.push(trimmed.to_string());
             }
         }
         Ok(apps)
@@ -485,11 +490,13 @@ impl Storage {
         let normalized = crate::monitor::normalize_domain(domain);
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        let exists: Option<i64> = conn.query_row(
-            "SELECT id FROM site_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
-            params![normalized, today],
-            |row| row.get(0),
-        ).optional()?;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM site_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
+                params![normalized, today],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         match exists {
             Some(id) => {
@@ -512,11 +519,13 @@ impl Storage {
         let normalized = crate::monitor::normalize_domain(domain);
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        let seconds: Option<i64> = conn.query_row(
-            "SELECT seconds FROM site_usage WHERE domain = ?1 AND date = ?2",
-            params![normalized, today],
-            |row| row.get(0),
-        ).optional()?;
+        let seconds: Option<i64> = conn
+            .query_row(
+                "SELECT seconds FROM site_usage WHERE domain = ?1 AND date = ?2",
+                params![normalized, today],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(seconds.unwrap_or(0))
     }
 
@@ -535,14 +544,21 @@ impl Storage {
         Ok(seconds.unwrap_or(0))
     }
 
-    pub fn track_app_data_usage(&self, app_name: &str, upload_bytes: i64, download_bytes: i64) -> anyhow::Result<()> {
+    pub fn track_app_data_usage(
+        &self,
+        app_name: &str,
+        upload_bytes: i64,
+        download_bytes: i64,
+    ) -> anyhow::Result<()> {
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        let exists: Option<i64> = conn.query_row(
-            "SELECT id FROM app_data_usage WHERE app_name = ?1 AND date = ?2 LIMIT 1",
-            params![app_name, today],
-            |row| row.get(0),
-        ).optional()?;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM app_data_usage WHERE app_name = ?1 AND date = ?2 LIMIT 1",
+                params![app_name, today],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         match exists {
             Some(id) => {
@@ -561,15 +577,22 @@ impl Storage {
         Ok(())
     }
 
-    pub fn track_site_data_usage(&self, domain: &str, upload_bytes: i64, download_bytes: i64) -> anyhow::Result<()> {
+    pub fn track_site_data_usage(
+        &self,
+        domain: &str,
+        upload_bytes: i64,
+        download_bytes: i64,
+    ) -> anyhow::Result<()> {
         let normalized = crate::monitor::normalize_domain(domain);
         let conn = self.connection.lock();
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        let exists: Option<i64> = conn.query_row(
-            "SELECT id FROM site_data_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
-            params![normalized, today],
-            |row| row.get(0),
-        ).optional()?;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM site_data_usage WHERE domain = ?1 AND date = ?2 LIMIT 1",
+                params![normalized, today],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         match exists {
             Some(id) => {
@@ -600,7 +623,7 @@ impl Storage {
              )
              WHERE date >= ?1
              GROUP BY date
-             ORDER BY date ASC"
+             ORDER BY date ASC",
         )?;
         let rows = statement.query_map(params![start], |row| {
             Ok(UsageDayBytes {

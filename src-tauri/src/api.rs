@@ -64,7 +64,7 @@ pub fn get_rules(state: State<'_, AppState>) -> CommandResult<Vec<Rule>> {
 #[tauri::command]
 pub fn save_rule(app: AppHandle, state: State<'_, AppState>, rule: Rule) -> CommandResult<Rule> {
     let saved = state.storage().save_rule(rule).map_err(to_command_error)?;
-    
+
     // Automatically enable Focus Mode when a rule is saved
     state.set_focus_mode(true);
     let _ = app.emit("focus_mode_changed", FocusModePayload { enabled: true });
@@ -77,7 +77,7 @@ pub fn save_rule(app: AppHandle, state: State<'_, AppState>, rule: Rule) -> Comm
 #[tauri::command]
 pub fn delete_rule(app: AppHandle, state: State<'_, AppState>, id: i64) -> CommandResult<()> {
     state.storage().delete_rule(id).map_err(to_command_error)?;
-    
+
     // Automatically disable Focus Mode if no rules remain
     let rules = state.storage().rules().map_err(to_command_error)?;
     if rules.is_empty() {
@@ -93,7 +93,6 @@ pub fn delete_rule(app: AppHandle, state: State<'_, AppState>, id: i64) -> Comma
 pub fn add_rule_time(app: AppHandle, id: i64, seconds: i64) -> CommandResult<()> {
     crate::extend_rule_limit(&app, id, seconds)
 }
-
 
 #[tauri::command]
 pub fn get_usage(
@@ -168,6 +167,16 @@ pub fn save_settings(
         .storage()
         .save_settings(&settings)
         .map_err(to_command_error)?;
+
+    // Sync launch at startup preference with the OS registry
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart_manager = app.autolaunch();
+    if settings.auto_start {
+        let _ = autostart_manager.enable();
+    } else {
+        let _ = autostart_manager.disable();
+    }
+
     app.emit("settings_changed", &saved)
         .map_err(to_command_error)?;
     Ok(saved)
@@ -201,19 +210,25 @@ pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<Strin
     }
 
     let mut sorted_apps: Vec<String> = apps.into_iter().collect();
-    sorted_apps.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    sorted_apps.sort_by_key(|a| a.to_lowercase());
     Ok(sorted_apps)
 }
 
 #[tauri::command]
-pub fn get_network_history(state: State<'_, AppState>, range: String) -> CommandResult<Vec<UsageDayBytes>> {
+pub fn get_network_history(
+    state: State<'_, AppState>,
+    range: String,
+) -> CommandResult<Vec<UsageDayBytes>> {
     let days = match range.as_str() {
         "7d" => 7,
         "30d" => 30,
         "90d" => 90,
         _ => 7,
     };
-    state.storage().network_usage_history(days).map_err(to_command_error)
+    state
+        .storage()
+        .network_usage_history(days)
+        .map_err(to_command_error)
 }
 
 #[tauri::command]

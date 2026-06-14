@@ -4,10 +4,10 @@ mod monitor;
 mod storage;
 
 use api::{
-    delete_rule, export_logs, export_usage_data, get_app_state, get_data_usage, get_network_speed,
-    get_rules, get_settings, get_usage, get_usage_90d, handshake, mark_backup_complete, save_rule,
-    save_settings, start_focus_mode, stop_focus_mode, toggle_focus_mode, get_available_apps,
-    get_network_history, add_rule_time, get_usage_range,
+    add_rule_time, delete_rule, export_logs, export_usage_data, get_app_state, get_available_apps,
+    get_data_usage, get_network_history, get_network_speed, get_rules, get_settings, get_usage,
+    get_usage_90d, get_usage_range, handshake, mark_backup_complete, save_rule, save_settings,
+    start_focus_mode, stop_focus_mode, toggle_focus_mode,
 };
 use models::AppReadyEvent;
 use monitor::{Monitor, NetworkMonitor};
@@ -16,7 +16,7 @@ use storage::Storage;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent, Listener,
+    Emitter, Listener, Manager, WindowEvent,
 };
 
 #[derive(Default, Clone, Debug)]
@@ -89,7 +89,7 @@ fn spawn_monitoring(app_handle: tauri::AppHandle) {
             interval.tick().await;
             let state = app_handle.state::<AppState>();
             let active_app = state.sample_active_app_and_persist();
-            
+
             if let Some(ref site) = active_app.site {
                 let _ = state.storage().track_site_time(site, 1);
             }
@@ -97,9 +97,17 @@ fn spawn_monitoring(app_handle: tauri::AppHandle) {
             // Track live network bytes attribution for daily usage
             let speed = state.network_speed();
             if speed.upload_bps > 0 || speed.download_bps > 0 {
-                let _ = state.storage().track_app_data_usage(&active_app.app, speed.upload_bps, speed.download_bps);
+                let _ = state.storage().track_app_data_usage(
+                    &active_app.app,
+                    speed.upload_bps,
+                    speed.download_bps,
+                );
                 if let Some(ref site) = active_app.site {
-                    let _ = state.storage().track_site_data_usage(site, speed.upload_bps, speed.download_bps);
+                    let _ = state.storage().track_site_data_usage(
+                        site,
+                        speed.upload_bps,
+                        speed.download_bps,
+                    );
                 }
             }
 
@@ -127,7 +135,7 @@ fn close_target_app(pid: Option<u32>) {
         {
             use std::process::Command;
             let _ = Command::new("taskkill")
-                .args(&["/F", "/PID", &pid.to_string()])
+                .args(["/F", "/PID", &pid.to_string()])
                 .spawn();
         }
     }
@@ -157,7 +165,7 @@ fn register_custom_protocol() -> Result<(), Box<dyn std::error::Error>> {
     let exe_str = exe_path.to_string_lossy().to_string();
 
     let _ = Command::new("reg")
-        .args(&[
+        .args([
             "add",
             "HKCU\\Software\\Classes\\silo",
             "/ve",
@@ -170,7 +178,7 @@ fn register_custom_protocol() -> Result<(), Box<dyn std::error::Error>> {
         .status();
 
     let _ = Command::new("reg")
-        .args(&[
+        .args([
             "add",
             "HKCU\\Software\\Classes\\silo",
             "/v",
@@ -185,7 +193,7 @@ fn register_custom_protocol() -> Result<(), Box<dyn std::error::Error>> {
 
     let cmd_val = format!("\"{}\" \"%1\"", exe_str);
     let _ = Command::new("reg")
-        .args(&[
+        .args([
             "add",
             "HKCU\\Software\\Classes\\silo\\shell\\open\\command",
             "/ve",
@@ -274,11 +282,17 @@ fn show_native_toast(
             if remaining_seconds <= 0 {
                 format!("Limit reached! Closed {}. Extend to keep using.", target)
             } else {
-                format!("Warning: Focus limit is approaching for {}. Extend time to keep active.", target)
+                format!(
+                    "Warning: Focus limit is approaching for {}. Extend time to keep active.",
+                    target
+                )
             }
         }
         "soft" => {
-            format!("Time limit reached today. {} minimized to help you stay focused.", target)
+            format!(
+                "Time limit reached today. {} minimized to help you stay focused.",
+                target
+            )
         }
         _ => "".to_string(),
     };
@@ -323,7 +337,8 @@ fn show_native_toast(
     let tag = HSTRING::from(format!("rule-{}", rule_id));
     toast.SetTag(&tag)?;
 
-    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from("com.yara.silo"))?;
+    let notifier =
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from("com.yara.silo"))?;
     notifier.Show(&toast)?;
 
     Ok(())
@@ -347,7 +362,13 @@ fn trigger_native_toast(
 
     #[cfg(target_os = "windows")]
     {
-        if let Err(err) = show_native_toast(rule_id, target, enforcement, limit_seconds, remaining_seconds) {
+        if let Err(err) = show_native_toast(
+            rule_id,
+            target,
+            enforcement,
+            limit_seconds,
+            remaining_seconds,
+        ) {
             tracing::error!("failed to show native toast: {:?}", err);
         }
     }
@@ -362,11 +383,7 @@ fn redirect_active_tab(url: &str) {
             url
         );
         let _ = Command::new("powershell")
-            .args(&[
-                "-NoProfile",
-                "-Command",
-                &script
-            ])
+            .args(["-NoProfile", "-Command", &script])
             .spawn();
     }
 }
@@ -384,7 +401,10 @@ fn check_and_enforce_rules(
     active_app: &models::ActiveApp,
 ) -> anyhow::Result<()> {
     let blocked_path = state.storage().data_dir().join("blocked.html");
-    let blocked_url = format!("file:///{}", blocked_path.to_string_lossy().replace('\\', "/"));
+    let blocked_url = format!(
+        "file:///{}",
+        blocked_path.to_string_lossy().replace('\\', "/")
+    );
     let rules = state.storage().rules()?;
     let mut rule_states = state.rule_states.lock();
     let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -403,7 +423,8 @@ fn check_and_enforce_rules(
             "app" => active_app.app.to_lowercase() == rule.target.to_lowercase(),
             "site" => {
                 if let Some(ref active_site) = active_app.site {
-                    crate::monitor::normalize_domain(active_site) == crate::monitor::normalize_domain(&rule.target)
+                    crate::monitor::normalize_domain(active_site)
+                        == crate::monitor::normalize_domain(&rule.target)
                 } else {
                     false
                 }
@@ -421,9 +442,7 @@ fn check_and_enforce_rules(
                 };
                 db_seconds + current_extra
             }
-            "site" => {
-                state.storage().today_site_seconds(&rule.target)?
-            }
+            "site" => state.storage().today_site_seconds(&rule.target)?,
             _ => 0,
         };
 
@@ -434,7 +453,7 @@ fn check_and_enforce_rules(
         };
 
         let remaining = limit - elapsed;
-        let rule_state = rule_states.entry(rule_id).or_insert_with(RuleState::default);
+        let rule_state = rule_states.entry(rule_id).or_default();
 
         if remaining > 300 {
             rule_state.warned_5m = false;
@@ -460,11 +479,18 @@ fn check_and_enforce_rules(
                         }),
                     );
 
-                    if remaining == 60 || remaining == 30 || remaining == 10 || remaining <= 5 {
-                        if rule_state.last_countdown_sec != Some(remaining) {
-                            rule_state.last_countdown_sec = Some(remaining);
-                            trigger_native_toast(app_handle, rule_id, &rule.target, "hard", limit, remaining);
-                        }
+                    if (remaining == 60 || remaining == 30 || remaining == 10 || remaining <= 5)
+                        && rule_state.last_countdown_sec != Some(remaining)
+                    {
+                        rule_state.last_countdown_sec = Some(remaining);
+                        trigger_native_toast(
+                            app_handle,
+                            rule_id,
+                            &rule.target,
+                            "hard",
+                            limit,
+                            remaining,
+                        );
                     }
                 }
 
@@ -477,8 +503,15 @@ fn check_and_enforce_rules(
 
                     if !rule_state.warned_soft_hit {
                         rule_state.warned_soft_hit = true;
-                        
-                        trigger_native_toast(app_handle, rule_id, &rule.target, "hard", limit, remaining);
+
+                        trigger_native_toast(
+                            app_handle,
+                            rule_id,
+                            &rule.target,
+                            "hard",
+                            limit,
+                            remaining,
+                        );
 
                         let _ = app_handle.emit(
                             "rule_violated",
@@ -499,7 +532,14 @@ fn check_and_enforce_rules(
                     if remaining <= 300 && remaining > 60 && !rule_state.warned_5m {
                         rule_state.warned_5m = true;
 
-                        trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        trigger_native_toast(
+                            app_handle,
+                            rule_id,
+                            &rule.target,
+                            "warn",
+                            limit,
+                            remaining,
+                        );
 
                         let _ = app_handle.emit(
                             "rule_warning",
@@ -517,7 +557,14 @@ fn check_and_enforce_rules(
                     if remaining <= 60 && !rule_state.warned_1m {
                         rule_state.warned_1m = true;
 
-                        trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        trigger_native_toast(
+                            app_handle,
+                            rule_id,
+                            &rule.target,
+                            "warn",
+                            limit,
+                            remaining,
+                        );
 
                         let _ = app_handle.emit(
                             "rule_warning",
@@ -531,11 +578,18 @@ fn check_and_enforce_rules(
                             }),
                         );
                     }
-                    
+
                     if remaining <= 60 {
                         if rule_state.last_countdown_sec != Some(remaining) {
                             rule_state.last_countdown_sec = Some(remaining);
-                            trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                            trigger_native_toast(
+                                app_handle,
+                                rule_id,
+                                &rule.target,
+                                "warn",
+                                limit,
+                                remaining,
+                            );
                         }
 
                         let _ = app_handle.emit(
@@ -560,7 +614,14 @@ fn check_and_enforce_rules(
                     if !rule_state.warned_soft_hit {
                         rule_state.warned_soft_hit = true;
 
-                        trigger_native_toast(app_handle, rule_id, &rule.target, "warn", limit, remaining);
+                        trigger_native_toast(
+                            app_handle,
+                            rule_id,
+                            &rule.target,
+                            "warn",
+                            limit,
+                            remaining,
+                        );
 
                         let _ = app_handle.emit(
                             "rule_violated",
@@ -589,7 +650,14 @@ fn check_and_enforce_rules(
                     if should_notify {
                         rule_state.last_soft_notification_ts = Some(now_ts);
 
-                        trigger_native_toast(app_handle, rule_id, &rule.target, "soft", limit, remaining);
+                        trigger_native_toast(
+                            app_handle,
+                            rule_id,
+                            &rule.target,
+                            "soft",
+                            limit,
+                            remaining,
+                        );
 
                         let _ = app_handle.emit(
                             "rule_violated",
@@ -619,9 +687,15 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(arg) = argv.get(1) {
                 if arg.starts_with("silo://add-time/") {
-                    let parts: Vec<&str> = arg.strip_prefix("silo://add-time/").unwrap().split('/').collect();
+                    let parts: Vec<&str> = arg
+                        .strip_prefix("silo://add-time/")
+                        .unwrap()
+                        .split('/')
+                        .collect();
                     if parts.len() == 2 {
-                        if let (Ok(rule_id), Ok(seconds)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                        if let (Ok(rule_id), Ok(seconds)) =
+                            (parts[0].parse::<i64>(), parts[1].parse::<i64>())
+                        {
                             let _ = extend_rule_limit(app, rule_id, seconds);
                         }
                     }
@@ -634,6 +708,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -647,6 +725,18 @@ pub fn run() {
             }
 
             let state = AppState::new()?;
+
+            // Synchronize launch at startup preference
+            use tauri_plugin_autostart::ManagerExt;
+            let autostart_manager = app.autolaunch();
+            if let Ok(settings) = state.storage().settings() {
+                if settings.auto_start {
+                    let _ = autostart_manager.enable();
+                } else {
+                    let _ = autostart_manager.disable();
+                }
+            }
+
             let data_dir = state.storage().data_dir();
             if let Err(e) = ensure_blocked_html(data_dir) {
                 tracing::error!("failed to write blocked.html: {:?}", e);
@@ -662,7 +752,8 @@ pub fn run() {
             } else {
                 "Start Focus Mode"
             };
-            let toggle_focus_i = MenuItemBuilder::with_id("toggle_focus", toggle_focus_text).build(app)?;
+            let toggle_focus_i =
+                MenuItemBuilder::with_id("toggle_focus", toggle_focus_text).build(app)?;
             let quit_i = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let separator1 = PredefinedMenuItem::separator(app)?;
             let separator2 = PredefinedMenuItem::separator(app)?;
@@ -682,39 +773,40 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(move |app, event| {
-                    match event.id.as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                .on_menu_event(move |app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        "add_rule" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                                let _ = app.emit("navigate", "rules");
-                            }
-                        }
-                        "toggle_focus" => {
-                            let app_state = app.state::<AppState>();
-                            let enabled = !app_state.focus_mode_enabled();
-                            app_state.set_focus_mode(enabled);
-                            let _ = app.emit("focus_mode_changed", serde_json::json!({ "enabled": enabled }));
-                            
-                            let new_text = if enabled {
-                                "Stop Focus Mode"
-                            } else {
-                                "Start Focus Mode"
-                            };
-                            let _ = toggle_focus_clone.set_text(new_text);
-                        }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
+                    "add_rule" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = app.emit("navigate", "rules");
+                        }
+                    }
+                    "toggle_focus" => {
+                        let app_state = app.state::<AppState>();
+                        let enabled = !app_state.focus_mode_enabled();
+                        app_state.set_focus_mode(enabled);
+                        let _ = app.emit(
+                            "focus_mode_changed",
+                            serde_json::json!({ "enabled": enabled }),
+                        );
+
+                        let new_text = if enabled {
+                            "Stop Focus Mode"
+                        } else {
+                            "Start Focus Mode"
+                        };
+                        let _ = toggle_focus_clone.set_text(new_text);
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {

@@ -71,7 +71,7 @@ SILO helps users monitor screen time, control distractions, analyze internet usa
 ---
 
 # Architecture
-
+```
 User Interface (Svelte + Tauri)
 ↓
 IPC Communication
@@ -84,7 +84,7 @@ Rust Backend
 ├── Storage Layer
 ├── Tray Services
 └── Optional Elevated Agent
-
+```
 ---
 
 # Dashboard

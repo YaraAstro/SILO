@@ -60,20 +60,11 @@ pub struct RulesSummary {
     pub site_rules: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSpeed {
     pub upload_bps: i64,
     pub download_bps: i64,
-}
-
-impl Default for NetworkSpeed {
-    fn default() -> Self {
-        Self {
-            upload_bps: 0,
-            download_bps: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
