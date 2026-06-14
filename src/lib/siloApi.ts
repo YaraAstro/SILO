@@ -7,6 +7,7 @@ export type Settings = {
   notificationsEnabled: boolean;
   sampleIntervalSeconds: number;
   lastBackupAt: string | null;
+  shortcutsEnabled: boolean;
 };
 
 export type Rule = {
@@ -115,6 +116,7 @@ export const siloApi = {
   saveRule: (rule: Rule) => invoke<Rule>("save_rule", { rule }),
   deleteRule: (id: number) => invoke<void>("delete_rule", { id }),
   getUsage: (date: string) => invoke<UsageReport>("get_usage", { date }),
+  getUsageRange: (range: string) => invoke<UsageReport>("get_usage_range", { range }),
   getUsage90d: () => invoke<UsageTimeline>("get_usage_90d"),
   getNetworkSpeed: () => invoke<NetworkSpeed>("get_network_speed"),
   getDataUsage: (range: string) => invoke<DataUsageReport>("get_data_usage", { range }),

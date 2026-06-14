@@ -79,6 +79,9 @@ impl Storage {
                 value.parse().unwrap_or(settings.sample_interval_seconds);
         }
         settings.last_backup_at = setting_value(&conn, "last_backup_at")?;
+        if let Some(value) = setting_value(&conn, "shortcuts_enabled")? {
+            settings.shortcuts_enabled = value == "true";
+        }
 
         Ok(settings)
     }
@@ -105,6 +108,11 @@ impl Storage {
         if let Some(last_backup_at) = &settings.last_backup_at {
             upsert_setting(&conn, "last_backup_at", last_backup_at)?;
         }
+        upsert_setting(
+            &conn,
+            "shortcuts_enabled",
+            &settings.shortcuts_enabled.to_string(),
+        )?;
         Ok(settings.clone())
     }
 
@@ -278,6 +286,58 @@ impl Storage {
         })
     }
 
+    pub fn usage_range_report(&self, range: &str) -> anyhow::Result<UsageReport> {
+        let days = match range {
+            "today" => 1,
+            "7d" => 7,
+            "30d" => 30,
+            "90d" => 90,
+            _ => 30,
+        };
+        let start_date = Utc::now().date_naive() - Duration::days(days - 1);
+        let start_ts = start_date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+
+        let conn = self.connection.lock();
+        
+        let mut statement = conn.prepare(
+            "SELECT app_name, COALESCE(SUM(duration_seconds), 0)
+             FROM sessions
+             WHERE start_ts >= ?1
+             GROUP BY app_name
+             ORDER BY SUM(duration_seconds) DESC",
+        )?;
+        let rows = statement.query_map(params![start_ts], |row| {
+            Ok(UsageBucket {
+                name: row.get(0)?,
+                seconds: row.get(1)?,
+            })
+        })?;
+        let apps = rows.collect::<Result<Vec<_>, _>>()?;
+        let total_seconds = apps.iter().map(|bucket| bucket.seconds).sum();
+
+        let mut site_statement = conn.prepare(
+            "SELECT domain, COALESCE(SUM(seconds), 0)
+             FROM site_usage
+             WHERE date >= ?1
+             GROUP BY domain
+             ORDER BY SUM(seconds) DESC",
+        )?;
+        let site_rows = site_statement.query_map(params![start_date.to_string()], |row| {
+            Ok(UsageBucket {
+                name: row.get(0)?,
+                seconds: row.get(1)?,
+            })
+        })?;
+        let sites = site_rows.collect::<Result<Vec<_>, _>>()?;
+
+        Ok(UsageReport {
+            date: range.to_string(),
+            total_seconds,
+            apps,
+            sites,
+        })
+    }
+
     pub fn today_seconds(&self) -> anyhow::Result<i64> {
         let today = Utc::now().format("%Y-%m-%d").to_string();
         Ok(self.usage_report(&today)?.total_seconds)
@@ -391,6 +451,11 @@ impl Storage {
             &conn,
             "sample_interval_seconds",
             &defaults.sample_interval_seconds.to_string(),
+        )?;
+        insert_setting_if_missing(
+            &conn,
+            "shortcuts_enabled",
+            &defaults.shortcuts_enabled.to_string(),
         )?;
         Ok(())
     }

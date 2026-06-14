@@ -104,6 +104,7 @@ pub struct Settings {
     pub notifications_enabled: bool,
     pub sample_interval_seconds: i64,
     pub last_backup_at: Option<String>,
+    pub shortcuts_enabled: bool,
 }
 
 impl Default for Settings {
@@ -115,6 +116,7 @@ impl Default for Settings {
             notifications_enabled: true,
             sample_interval_seconds: 5,
             last_backup_at: None,
+            shortcuts_enabled: true,
         }
     }
 }

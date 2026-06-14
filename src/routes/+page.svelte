@@ -85,6 +85,20 @@
   let dataUsage = $state<DataUsageReport | null>(null);
   let ruleDraft = $state<Rule>(emptyRule());
   let dataRange = $state<RangeKey>("30d");
+  
+  // Enhanced Stats View State
+  let statsSubTab = $state<"screentime" | "network" | "habits">("screentime");
+  let statsRange = $state<"today" | RangeKey>("7d");
+  let statsScreenTab = $state<"apps" | "sites">("apps");
+  let statsNetworkTab = $state<"apps" | "sites">("apps");
+  let statsSearch = $state("");
+  let screenTimePage = $state(1);
+  let networkPage = $state(1);
+  let statsUsage = $state<UsageReport | null>(null);
+  let statsDataUsage = $state<DataUsageReport | null>(null);
+  let statsNetworkHistory = $state<UsageDayBytes[]>([]);
+  let heatmapNetworkHistory = $state<UsageDayBytes[]>([]);
+  let heatmapTab = $state<"screentime" | "network">("screentime");
   let ruleSearch = $state("");
   let loading = $state(true);
   let savingRule = $state(false);
@@ -138,6 +152,167 @@
       row.name.toLowerCase().includes(moreModalSearch.toLowerCase()),
     ),
   );
+
+  const pageSize = 5;
+
+  let filteredStatsScreenList = $derived(
+    (statsScreenTab === "apps" 
+      ? (statsUsage?.apps ?? []) 
+      : (statsUsage?.sites ?? [])
+    ).filter(item => item.name.toLowerCase().includes(statsSearch.toLowerCase()))
+  );
+
+  let paginatedStatsScreenList = $derived(
+    filteredStatsScreenList.slice((screenTimePage - 1) * pageSize, screenTimePage * pageSize)
+  );
+
+  let totalScreenPages = $derived(
+    Math.max(1, Math.ceil(filteredStatsScreenList.length / pageSize))
+  );
+
+  let filteredStatsNetworkList = $derived(
+    (statsNetworkTab === "apps" 
+      ? (statsDataUsage?.apps ?? []) 
+      : (statsDataUsage?.sites ?? [])
+    ).filter(item => item.name.toLowerCase().includes(statsSearch.toLowerCase()))
+  );
+
+  let paginatedStatsNetworkList = $derived(
+    filteredStatsNetworkList.slice((networkPage - 1) * pageSize, networkPage * pageSize)
+  );
+
+  let totalNetworkPages = $derived(
+    Math.max(1, Math.ceil(filteredStatsNetworkList.length / pageSize))
+  );
+
+  // Dynamic Focus Score calculations
+  let focusScoreValue = $derived.by(() => {
+    let score = 100;
+    
+    rules.forEach(rule => {
+      if (rule.active) {
+        const remaining = getRuleRemainingSeconds(rule);
+        const limit = rule.extraLimitDate === new Date().toISOString().slice(0, 10)
+          ? rule.limitSeconds + (rule.extraLimitSeconds ?? 0)
+          : rule.limitSeconds;
+        
+        if (limit > 0) {
+          const usedPct = ((limit - remaining) / limit) * 100;
+          if (usedPct >= 100) {
+            score -= 20; 
+          } else if (usedPct >= 80) {
+            score -= 10; 
+          } else if (usedPct >= 50) {
+            score -= 5;  
+          }
+        }
+      }
+    });
+
+    return Math.max(20, Math.min(100, score));
+  });
+
+  let focusScoreLabel = $derived.by(() => {
+    const score = focusScoreValue;
+    if (score >= 90) return "Optimal Focus";
+    if (score >= 75) return "Good Focus";
+    if (score >= 60) return "Moderate distractions";
+    return "Highly Distracted";
+  });
+
+  let focusScoreColor = $derived.by(() => {
+    const val = focusScoreValue;
+    if (val >= 90) return { primary: "#2dd4bf", secondary: "#14b8a6", shadow: "rgba(45,212,191,0.25)", label: "text-teal-400 border-teal-500/20 bg-teal-500/5" };
+    if (val >= 75) return { primary: "#3b82f6", secondary: "#1d4ed8", shadow: "rgba(59,130,246,0.25)", label: "text-blue-400 border-blue-500/20 bg-blue-500/5" };
+    if (val >= 60) return { primary: "#fbbf24", secondary: "#d97706", shadow: "rgba(251,191,36,0.25)", label: "text-amber-400 border-amber-500/20 bg-amber-500/5" };
+    return { primary: "#f43f5e", secondary: "#be123c", shadow: "rgba(244,63,94,0.25)", label: "text-rose-400 border-rose-500/20 bg-rose-500/5" };
+  });
+
+  let greetingText = $derived.by(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 17) return "Good Afternoon";
+    if (hour < 22) return "Good Evening";
+    return "Good Night";
+  });
+
+  let currentDateStr = $derived.by(() => {
+    return new Date().toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric"
+    });
+  });
+
+  // Dynamic AI insights generator
+  let aiInsightsList = $derived.by(() => {
+    let list: Array<{ title: string; desc: string; type: "success" | "warn" | "info" }> = [];
+    
+    if (snapshot?.focusMode) {
+      list.push({
+        title: "Focus Shield Active",
+        desc: "SILO is actively monitoring and shielding your session rules.",
+        type: "success"
+      });
+    } else {
+      list.push({
+        title: "Shield Deactivated",
+        desc: "Rule limits will not be blocked unless Focus Shield is activated.",
+        type: "info"
+      });
+    }
+
+    const totalSeconds = snapshot?.todaySeconds ?? 0;
+    const hours = totalSeconds / 3600;
+    if (hours > 6) {
+      list.push({
+        title: "High Workload Alert",
+        desc: "You've tracked over 6 hours of work today. Take a quick break to refresh.",
+        type: "warn"
+      });
+    } else if (hours > 2) {
+      list.push({
+        title: "Great Momentum",
+        desc: "Logging solid productive hours today. Keep it up!",
+        type: "success"
+      });
+    }
+
+    let limitWarning = false;
+    rules.forEach(rule => {
+      if (rule.active) {
+        const remaining = getRuleRemainingSeconds(rule);
+        if (remaining > 0 && remaining <= 300) {
+          limitWarning = true;
+          list.push({
+            title: `Approaching Limit: ${rule.target}`,
+            desc: `Only ${formatDuration(remaining)} remaining before limit enforcement.`,
+            type: "warn"
+          });
+        }
+      }
+    });
+
+    if (!limitWarning && list.length < 3) {
+      list.push({
+        title: "Clean Record",
+        desc: "All monitored services are within their allowed limits today.",
+        type: "success"
+      });
+    }
+
+    return list.slice(0, 3);
+  });
+
+  $effect(() => {
+    statsSearch;
+    statsScreenTab;
+    statsNetworkTab;
+    statsSubTab;
+    statsRange;
+    screenTimePage = 1;
+    networkPage = 1;
+  });
 
   async function loadDetailUsage(range: "today" | "7d" | "30d") {
     try {
@@ -382,6 +557,7 @@
         loadDataUsage(dataRange),
         loadAvailableApps(),
         loadNetworkHistory(),
+        loadStatsData(statsRange),
       ]);
     } catch (error) {
       showToast(toErrorMessage(error), "error");
@@ -508,7 +684,33 @@
 
   async function loadTimeline() {
     timeline = await siloApi.getUsage90d();
+    try {
+      heatmapNetworkHistory = await siloApi.getNetworkHistory("90d");
+    } catch (e) {
+      console.error("Failed to load 90d network history for heatmap:", e);
+    }
   }
+
+  async function loadStatsData(range: "today" | RangeKey) {
+    try {
+      const [uReport, dReport, netHist] = await Promise.all([
+        siloApi.getUsageRange(range),
+        siloApi.getDataUsage(range),
+        siloApi.getNetworkHistory(range === "90d" ? "90d" : range === "7d" ? "7d" : "30d")
+      ]);
+      statsUsage = uReport;
+      statsDataUsage = dReport;
+      statsNetworkHistory = netHist;
+    } catch (error) {
+      console.error("Failed to load statistics range data:", error);
+    }
+  }
+
+  $effect(() => {
+    if (activeView === "stats" && statsRange) {
+      void loadStatsData(statsRange);
+    }
+  });
 
   async function loadDataUsage(range: RangeKey) {
     dataRange = range;
@@ -935,7 +1137,93 @@
   function consumerTotal(consumer: DataConsumer) {
     return consumer.downloadBytes + consumer.uploadBytes;
   }
+
+  function getNetworkHeatmapColor(bytes: number) {
+    if (bytes > 1_073_741_824) return "bg-violet-300 shadow-[0_0_6px_rgba(167,139,250,0.4)]";
+    if (bytes > 104_857_600) return "bg-violet-500";
+    if (bytes > 1_048_576) return "bg-violet-900";
+    return "bg-slate-900";
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    const activeEl = document.activeElement;
+    if (
+      activeEl &&
+      (activeEl.tagName === "INPUT" ||
+        activeEl.tagName === "TEXTAREA" ||
+        activeEl.tagName === "SELECT" ||
+        activeEl.getAttribute("contenteditable") === "true")
+    ) {
+      if (e.key === "Escape") {
+        (activeEl as HTMLElement).blur();
+        showAppDropdown = false;
+        showSiteDropdown = false;
+      }
+      return;
+    }
+
+    if (e.key === "Escape") {
+      if (showRuleForm) {
+        showRuleForm = false;
+        ruleDraft = emptyRule();
+        e.preventDefault();
+      }
+      if (showConfirmDeleteOverlay) {
+        showConfirmDeleteOverlay = false;
+        ruleToDelete = null;
+        e.preventDefault();
+      }
+      if (showWarningOverlay) {
+        showWarningOverlay = false;
+        warningData = null;
+        e.preventDefault();
+      }
+      if (showViolationOverlay) {
+        showViolationOverlay = false;
+        violationData = null;
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (settings?.shortcutsEnabled) {
+      switch (e.key.toLowerCase()) {
+        case "d":
+        case "1":
+          activeView = "dashboard";
+          e.preventDefault();
+          break;
+        case "r":
+        case "2":
+          activeView = "rules";
+          e.preventDefault();
+          break;
+        case "s":
+        case "3":
+          activeView = "stats";
+          e.preventDefault();
+          break;
+        case "n":
+        case "4":
+          activeView = "network";
+          e.preventDefault();
+          break;
+        case "p":
+        case "5":
+        case ",":
+          activeView = "settings";
+          e.preventDefault();
+          break;
+        case " ":
+          void toggleFocus();
+          e.preventDefault();
+          break;
+      }
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleKeyDown} />
 
 <svelte:head>
   <title>SILO</title>
@@ -967,36 +1255,96 @@
         </div>
       </section>
     {:else if activeView === "dashboard"}
-      <section class="space-y-6">
-        <header class="text-center">
-          <h1 class="text-5xl font-black tracking-normal">
-            <span class="text-teal-300">SI</span><span class="text-blue-400"
-              >L</span
-            ><span class="text-violet-400">O</span>
-          </h1>
-          <p class="mt-3 text-base text-slate-400">Your focus space</p>
-          <button class="silo-button mt-7" type="button" onclick={toggleFocus}>
-            <Power size={17} />
-            {snapshot?.focusMode ? "Stop Focus" : "Start Focus"}
-          </button>
+      <section class="space-y-6" transition:fade={{ duration: 150 }}>
+        <!-- Premium Header Area -->
+        <header class="relative overflow-hidden rounded-3xl border transition-all duration-500 backdrop-blur-md p-8 shadow-2xl
+          {snapshot?.focusMode 
+            ? 'border-red-500/15 bg-slate-950/60 shadow-red-950/5' 
+            : 'border-slate-800/80 bg-slate-950/45 shadow-black/35'}">
+          <!-- Pulsing backdrop glow -->
+          <div class="absolute -right-16 -top-16 h-48 w-48 rounded-full transition-colors duration-700 blur-3xl animate-pulse-glow
+            {snapshot?.focusMode ? 'bg-red-500/5' : 'bg-teal-500/10'}"></div>
+          <div class="absolute -left-16 -bottom-16 h-48 w-48 rounded-full transition-colors duration-700 blur-3xl animate-pulse-glow
+            {snapshot?.focusMode ? 'bg-rose-500/5' : 'bg-purple-500/10'}"></div>
+          
+          <!-- Branding + Time Row -->
+          <div class="flex flex-col sm:flex-row items-center sm:justify-between gap-4 border-b border-slate-800/40 pb-6 mb-6">
+            <div class="text-center sm:text-left">
+              <p class="text-[10px] font-black text-teal-400 uppercase tracking-widest mb-1.5">{currentDateStr}</p>
+              <h1 class="text-3xl font-black text-slate-100 flex items-center justify-center sm:justify-start gap-2">
+                <span>{greetingText}</span>
+              </h1>
+            </div>
+            <div class="flex items-center gap-2.5 bg-slate-900/60 px-4 py-2 rounded-2xl border border-slate-800/50">
+              <span class="text-xl font-extrabold bg-gradient-to-r from-teal-300 via-blue-400 to-violet-400 bg-clip-text text-transparent tracking-wider">SILO</span>
+              <span class="h-4 w-px bg-slate-800"></span>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">v{boot?.version || "0.3.0"}</span>
+            </div>
+          </div>
+
+          <p class="text-slate-400 text-sm font-semibold tracking-wide">
+            {snapshot?.focusMode 
+              ? "Shield is actively intercepting notifications and monitoring distractors."
+              : "Shield is currently offline. Your limits and blocks are paused."}
+          </p>
+          
+          <div class="mt-6 flex justify-center">
+            <div class="relative">
+              {#if snapshot?.focusMode}
+                <!-- Glowing ring behind button -->
+                <div class="absolute -inset-1 rounded-2xl bg-gradient-to-r from-red-500 to-rose-600 opacity-30 blur-md animate-pulse"></div>
+              {/if}
+              <button 
+                class="relative group px-8 py-3.5 rounded-2xl font-extrabold text-sm transition-all duration-300 overflow-hidden flex items-center gap-2.5 shadow-lg
+                  {snapshot?.focusMode 
+                    ? 'bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-red-500/15 hover:shadow-red-500/25 hover:scale-[1.03] active:scale-[0.98]' 
+                    : 'bg-gradient-to-r from-teal-400 to-emerald-500 text-slate-950 shadow-teal-500/15 hover:shadow-teal-500/25 hover:scale-[1.03] active:scale-[0.98]'}" 
+                type="button" 
+                onclick={toggleFocus}
+              >
+                <Power size={18} class={snapshot?.focusMode ? 'animate-pulse' : ''} />
+                <span>{snapshot?.focusMode ? "Disable Focus Guard" : "Activate Focus Shield"}</span>
+              </button>
+            </div>
+          </div>
         </header>
 
+        <!-- Metrics cards row -->
         <div class="grid gap-5 md:grid-cols-3">
-          <section class="silo-card p-6">
-            <div class="flex items-center gap-3">
-              <IconBadge
-                icon={Monitor}
-                tone="teal"
-                label="Active application"
-              />
-              <h2 class="text-lg font-bold">Active Application</h2>
+          <!-- Active application -->
+          <section class="silo-card p-6 flex flex-col justify-between relative overflow-hidden group hover:border-teal-500/30 transition-all duration-300">
+            <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-teal-500/5 blur-xl group-hover:bg-teal-500/10 transition-colors"></div>
+            <div>
+              <div class="flex items-center justify-between">
+                <IconBadge
+                  icon={snapshot?.activeApp.site ? Globe : Monitor}
+                  tone={snapshot?.activeApp.site ? "teal" : "purple"}
+                  label="Active application"
+                />
+                {#if snapshot?.activeApp.app}
+                  <span class="flex items-center gap-1.5 text-xs text-teal-400 font-bold bg-teal-950/40 border border-teal-500/20 px-2 py-0.5 rounded-full">
+                    <span class="h-1.5 w-1.5 rounded-full bg-teal-400 animate-radar"></span>
+                    Live
+                  </span>
+                {/if}
+              </div>
+              
+              {#if snapshot?.activeApp.site}
+                <p class="mt-6 truncate text-2xl font-black text-slate-100 group-hover:text-teal-300 transition-colors" title={snapshot.activeApp.site}>
+                  {snapshot.activeApp.site}
+                </p>
+                <p class="mt-1 truncate text-xs text-slate-500 font-semibold uppercase tracking-wider">
+                  via {snapshot.activeApp.app}
+                </p>
+              {:else}
+                <p class="mt-6 truncate text-2xl font-black text-slate-100 group-hover:text-purple-300 transition-colors" title={snapshot?.activeApp.app || "No active app"}>
+                  {snapshot?.activeApp.app || "No active app"}
+                </p>
+                <p class="mt-1 truncate text-xs text-slate-500 font-semibold uppercase tracking-wider">
+                  {snapshot?.activeApp.title || "Current window"}
+                </p>
+              {/if}
             </div>
-            <p class="mt-6 truncate text-2xl font-bold">
-              {snapshot?.activeApp.app || "No active app"}
-            </p>
-            <p class="mt-1 truncate text-sm text-slate-500">
-              {snapshot?.activeApp.title || "Current window"}
-            </p>
             <p
               class="mt-5 flex items-center gap-2 font-mono text-lg font-bold text-teal-300"
             >
@@ -1005,52 +1353,85 @@
             </p>
           </section>
 
-          <section class="silo-card p-6">
-            <div class="flex items-center gap-3">
-              <IconBadge icon={Timer} tone="purple" label="Session progress" />
-              <h2 class="text-lg font-bold">Session Progress</h2>
+          <!-- Session progress -->
+          <section class="silo-card p-6 flex flex-col justify-between relative overflow-hidden group hover:border-purple-500/30 transition-all duration-300">
+            <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-purple-500/5 blur-xl group-hover:bg-purple-500/10 transition-colors"></div>
+            <div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <IconBadge icon={Timer} tone="purple" label="Session progress" />
+                  <h2 class="text-sm font-bold text-slate-400">Session Progress</h2>
+                </div>
+                <span class="text-xs font-mono font-bold text-purple-300">
+                  {Math.round(Math.min(100, ((snapshot?.todaySeconds ?? 0) / 28800) * 100))}%
+                </span>
+              </div>
+              <p class="mt-6 text-3xl font-black text-slate-100 font-mono">
+                {formatDuration(snapshot?.todaySeconds ?? 0)}
+              </p>
+              <p class="mt-1 text-xs text-slate-500 font-medium">Tracked focus today (Goal: 8h)</p>
             </div>
-            <p class="mt-6 text-3xl font-black">
-              {formatDuration(snapshot?.todaySeconds ?? 0)}
-            </p>
-            <p class="mt-1 text-sm text-slate-500">Tracked today</p>
-            <div class="mt-5 h-2 rounded-full bg-slate-800">
-              <div
-                class="h-2 rounded-full bg-teal-400"
-                style={`width: ${Math.min(100, ((snapshot?.todaySeconds ?? 0) / 28800) * 100)}%`}
-              ></div>
+            <div class="mt-5">
+              <div class="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden relative border border-slate-800/80">
+                <div
+                  class="h-full rounded-full bg-gradient-to-r from-teal-400 to-purple-500 animate-shimmer"
+                  style={`width: ${Math.min(100, ((snapshot?.todaySeconds ?? 0) / 28800) * 100)}%; background-size: 200% 100%;`}
+                ></div>
+              </div>
+              <p class="mt-3 text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full {snapshot?.focusMode ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}"></span>
+                {snapshot?.focusMode ? "Monitoring Active" : "Shield Suspended"}
+              </p>
             </div>
-            <p class="mt-4 text-sm text-slate-400">
-              {snapshot?.focusMode
-                ? "Focus mode is running"
-                : "Focus mode is stopped"}
-            </p>
           </section>
 
-          <section class="silo-card p-6">
-            <div class="flex items-center gap-3">
-              <IconBadge icon={Target} tone="teal" label="Focus score" />
-              <h2 class="text-lg font-bold">Focus Score</h2>
+          <!-- Live focus score -->
+          <section class="silo-card p-6 flex flex-col justify-between items-center text-center relative overflow-hidden group hover:border-amber-500/30 transition-all duration-300">
+            <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-amber-500/5 blur-xl group-hover:bg-amber-500/10 transition-colors"></div>
+            <div class="flex items-center gap-2 self-start">
+              <IconBadge icon={Target} tone="yellow" label="Focus score" />
+              <h2 class="text-sm font-bold text-slate-400">Live Focus Score</h2>
             </div>
-            <EmptyState
-              compact
-              icon={Gauge}
-              title="Score pending"
-              message="Productivity scoring needs rule violations and focus-session history from later backend phases."
-            />
+            
+            <div class="my-3 flex flex-col items-center">
+              <div class="relative flex items-center justify-center">
+                <!-- Circular Progress Ring with Gradient -->
+                <svg class="h-28 w-28 -rotate-90">
+                  <defs>
+                    <linearGradient id="focusScoreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color={focusScoreColor.primary} />
+                      <stop offset="100%" stop-color={focusScoreColor.secondary} />
+                    </linearGradient>
+                  </defs>
+                  <circle class="text-slate-900" stroke-width="8" stroke="currentColor" fill="transparent" r="42" cx="56" cy="56" />
+                  <circle stroke="url(#focusScoreGradient)" stroke-width="8" stroke-dasharray={2 * Math.PI * 42} stroke-dashoffset={2 * Math.PI * 42 * (1 - focusScoreValue / 100)} stroke-linecap="round" fill="transparent" r="42" cx="56" cy="56" class="transition-all duration-500" style={`filter: drop-shadow(0 0 6px ${focusScoreColor.shadow})`} />
+                </svg>
+                <div class="absolute text-3xl font-black text-slate-100 font-mono">
+                  {focusScoreValue}%
+                </div>
+              </div>
+              <span class="text-[10px] font-black tracking-widest uppercase mt-3 px-3 py-1 rounded-full border transition-colors duration-500 {focusScoreColor.label}">
+                {focusScoreLabel}
+              </span>
+            </div>
+            
+            <p class="text-[10px] text-slate-500 text-center font-medium">
+              Updates dynamically based on focus rules and limit breaches.
+            </p>
           </section>
         </div>
 
+        <!-- Weekly pattern and live speeds -->
         <div class="grid gap-5 xl:grid-cols-3">
-          <section class="silo-card p-6 xl:col-span-2">
+          <!-- Weekly trend chart -->
+          <section class="silo-card p-6 xl:col-span-2 relative overflow-hidden group hover:border-teal-500/20 transition-all duration-300">
+            <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-teal-500/5 blur-xl group-hover:bg-teal-500/10 transition-colors"></div>
             <div class="flex items-center justify-between gap-4">
               <div class="flex items-center gap-3">
                 <IconBadge icon={Activity} tone="teal" label="Focus pattern" />
                 <div>
-                  <h2 class="text-lg font-bold">Today's Focus Pattern</h2>
-                  <p class="text-sm text-slate-500">
-                    Screen-time trend from stored sessions
-                  </p>
+                  <h2 class="text-lg font-bold">Focus Trend</h2>
+                  <p class="text-sm text-slate-500">Weekly tracked screen time (minutes)</p>
                 </div>
               </div>
             </div>
@@ -1071,234 +1452,322 @@
             {/if}
           </section>
 
-          <section class="silo-card p-6">
-            <div class="flex items-center justify-between gap-3">
-              <div class="flex items-center gap-3">
-                <IconBadge icon={Wifi} tone="teal" label="Network" />
-                <h2 class="text-lg font-bold">Network</h2>
+          <!-- Live Network attribution speed card -->
+          <section class="silo-card p-6 flex flex-col justify-between relative overflow-hidden group hover:border-teal-500/30 transition-all duration-300">
+            <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-teal-500/5 blur-xl group-hover:bg-teal-500/10 transition-colors"></div>
+            <div>
+              <div class="flex items-center justify-between gap-3 border-b border-slate-800/60 pb-3">
+                <div class="flex items-center gap-3">
+                  <IconBadge icon={Wifi} tone="teal" label="Network Speed" />
+                  <h2 class="text-lg font-bold">Network Speed</h2>
+                </div>
+                <span class="flex items-center gap-1 text-[10px] text-emerald-300 font-black px-2.5 py-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 animate-pulse">
+                  <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                  LIVE
+                </span>
               </div>
-              <span class="flex items-center gap-1 text-xs text-emerald-300">
-                <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-                Live
-              </span>
+              
+              <div class="mt-6 space-y-5">
+                <div>
+                  <div class="flex items-center justify-between text-xs font-semibold text-slate-400 mb-1.5">
+                    <span class="flex items-center gap-1.5"><Download size={13} class="text-teal-400" /> Download</span>
+                    <span class="font-bold text-slate-200 font-mono">{formatBps(snapshot?.networkSpeed.downloadBps ?? 0)}</span>
+                  </div>
+                  <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden relative border border-slate-900">
+                    <div 
+                      class="h-full bg-teal-400 transition-all duration-300 rounded-full {snapshot?.networkSpeed.downloadBps && snapshot.networkSpeed.downloadBps > 1024 ? 'animate-shimmer bg-gradient-to-r from-teal-400 via-teal-300 to-teal-400' : ''}"
+                      style={`width: ${Math.max(4, Math.min(100, ((snapshot?.networkSpeed.downloadBps ?? 0) / 10_485_760) * 100))}%`}
+                    ></div>
+                  </div>
+                </div>
+                
+                <div>
+                  <div class="flex items-center justify-between text-xs font-semibold text-slate-400 mb-1.5">
+                    <span class="flex items-center gap-1.5"><Upload size={13} class="text-violet-400" /> Upload</span>
+                    <span class="font-bold text-slate-200 font-mono">{formatBps(snapshot?.networkSpeed.uploadBps ?? 0)}</span>
+                  </div>
+                  <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden relative border border-slate-900">
+                    <div 
+                      class="h-full bg-violet-400 transition-all duration-300 rounded-full {snapshot?.networkSpeed.uploadBps && snapshot.networkSpeed.uploadBps > 1024 ? 'animate-shimmer bg-gradient-to-r from-violet-400 via-violet-300 to-violet-400' : ''}"
+                      style={`width: ${Math.max(4, Math.min(100, ((snapshot?.networkSpeed.uploadBps ?? 0) / 5_242_880) * 100))}%`}
+                    ></div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <div>
-                <p class="flex items-center gap-2 text-sm text-slate-500">
-                  <Download size={15} /> Download
-                </p>
-                <p class="mt-1 text-2xl font-black">
-                  {formatBps(snapshot?.networkSpeed.downloadBps ?? 0)}
-                </p>
-              </div>
-              <div>
-                <p class="flex items-center gap-2 text-sm text-slate-500">
-                  <Upload size={15} /> Upload
-                </p>
-                <p class="mt-1 text-2xl font-black">
-                  {formatBps(snapshot?.networkSpeed.uploadBps ?? 0)}
-                </p>
-              </div>
-            </div>
-            <p
-              class="mt-6 rounded-lg border border-slate-700 bg-slate-950/35 p-3 text-sm text-slate-500"
-            >
-              Live speed uses total OS interface counters. Per-app and per-site
-              attribution is still pending.
+            
+            <p class="mt-6 rounded-xl border border-slate-800/80 bg-slate-950/45 p-3.5 text-[10px] font-medium text-slate-500 leading-relaxed">
+              Speed captures total interface activity. App-specific values log asynchronously.
             </p>
           </section>
         </div>
 
+        <!-- AI insights and Today's Usage breakdown -->
         <div class="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-          <section class="silo-card p-6">
-            <div class="flex items-center gap-3">
+          <!-- Mapped AI Insights -->
+          <section class="silo-card p-6 relative overflow-hidden group hover:border-purple-500/20 transition-all duration-300">
+            <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-purple-500/5 blur-xl group-hover:bg-purple-500/10 transition-colors"></div>
+            <div class="flex items-center gap-3 border-b border-slate-800/60 pb-4 mb-4">
               <IconBadge icon={Sparkles} tone="purple" label="AI insights" />
               <div>
-                <h2 class="text-lg font-bold">AI Insights</h2>
-                <p class="text-sm text-slate-500">
-                  Personalized productivity tips
-                </p>
+                <h2 class="text-lg font-bold">AI Focus Analysis</h2>
+                <p class="text-sm text-slate-500">Real-time productivity suggestions</p>
               </div>
             </div>
-            <div class="mt-5 grid gap-3">
-              <EmptyState
-                compact
-                icon={Sparkles}
-                title="Insights unavailable"
-                message="AI productivity insights are planned after richer focus, rules, and usage signals are stored."
-              />
+            
+            <div class="space-y-3.5 mt-4">
+              {#if aiInsightsList.length}
+                {#each aiInsightsList as insight}
+                  <div class="p-3.5 rounded-xl border flex gap-3 text-sm font-medium transition-all duration-200 bg-slate-950/25 hover:bg-slate-950/50 hover:scale-[1.01]
+                    {insight.type === 'success'
+                      ? 'border-emerald-500/10 hover:border-emerald-500/25 text-emerald-300'
+                      : insight.type === 'warn'
+                        ? 'border-amber-500/10 hover:border-amber-500/25 text-amber-300'
+                        : 'border-blue-500/10 hover:border-blue-500/25 text-blue-300'}">
+                    <div class="flex items-start mt-0.5">
+                      <span class="h-2 w-2 rounded-full mt-1.5 animate-pulse
+                        {insight.type === 'success'
+                          ? 'bg-emerald-400'
+                          : insight.type === 'warn'
+                            ? 'bg-amber-400'
+                            : 'bg-blue-400'}"></span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="font-bold text-slate-200 mb-0.5 truncate">{insight.title}</p>
+                      <p class="text-xs text-slate-400 font-semibold leading-relaxed">{insight.desc}</p>
+                    </div>
+                  </div>
+                {/each}
+              {:else}
+                <div class="py-10 text-center text-slate-500 text-sm font-semibold flex flex-col items-center justify-center gap-2">
+                  <div class="h-5 w-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Analyzing focus logs to generate suggestions...</span>
+                </div>
+              {/if}
             </div>
           </section>
 
-          <section class="silo-card p-6">
-            <div class="flex items-center justify-between gap-3">
-              <div class="flex items-center gap-3">
-                <IconBadge icon={ChartColumn} tone="teal" label="Usage" />
-                <h2 class="text-lg font-bold">Today's Usage</h2>
+          <!-- Sleek Usage List -->
+          <section class="silo-card p-6 hover:border-teal-500/20 transition-all duration-300 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                  <IconBadge icon={ChartColumn} tone="teal" label="Usage" />
+                  <h2 class="text-lg font-bold">Today's Usage</h2>
+                </div>
+                <button
+                  class="silo-icon-button p-1 text-slate-400 hover:text-teal-300 hover:bg-slate-800 transition rounded-lg"
+                  type="button"
+                  aria-label="Refresh usage"
+                  onclick={handleRefresh}
+                  disabled={isRefreshing}
+                >
+                  <RotateCcw size={15} class={isRefreshing ? "animate-spin text-teal-400" : ""} />
+                </button>
               </div>
-              <button
-                class="silo-icon-button p-1 text-slate-400 hover:text-teal-300 hover:bg-slate-800 transition rounded-lg"
-                type="button"
-                aria-label="Refresh usage"
-                onclick={handleRefresh}
-                disabled={isRefreshing}
-              >
-                <RotateCcw size={15} class={isRefreshing ? "animate-spin text-teal-400" : ""} />
-              </button>
-            </div>
-            <div class="mt-4 flex rounded-lg bg-slate-950 p-1">
-              <button
-                class="flex-1 rounded-md py-1.5 text-center text-xs font-semibold transition
-                  {usageTab === 'apps' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
-                type="button"
-                onclick={() => (usageTab = "apps")}
-              >
-                Applications
-              </button>
-              <button
-                class="flex-1 rounded-md py-1.5 text-center text-xs font-semibold transition
-                  {usageTab === 'sites' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
-                type="button"
-                onclick={() => (usageTab = "sites")}
-              >
-                Websites
-              </button>
-            </div>
+              
+              <div class="mt-4 flex rounded-lg bg-slate-950 p-1">
+                <button
+                  class="flex-1 rounded-md py-1.5 text-center text-xs font-semibold transition
+                    {usageTab === 'apps' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                  type="button"
+                  onclick={() => (usageTab = "apps")}
+                >
+                  Applications
+                </button>
+                <button
+                  class="flex-1 rounded-md py-1.5 text-center text-xs font-semibold transition
+                    {usageTab === 'sites' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                  type="button"
+                  onclick={() => (usageTab = "sites")}
+                >
+                  Websites
+                </button>
+              </div>
 
-            {#key refreshKey}
-              <div 
-                in:scale={{ duration: 400, start: 0.98, opacity: 0 }}
-                class="mt-5 flex flex-col gap-2.5"
-              >
-                {#if usageTab === "apps"}
-                  {#if usage?.apps.length}
-                    {#each usage.apps.slice(0, 6) as app}
-                      {@const targetRule = getTargetRule(app.name, usageTab)}
-                      <div class="silo-card p-3 flex items-center justify-between gap-4 bg-slate-900/30 hover:border-slate-700/80 transition-colors">
-                        <!-- Leading: Icon & Name -->
-                        <div class="flex items-center gap-3 min-w-0">
-                          <IconBadge
-                            icon={Monitor}
-                            tone="purple"
-                            label={app.name}
-                            size="md"
-                          />
-                          <div class="min-w-0">
-                            <span class="truncate font-bold text-sm text-slate-200 block" title={app.name}>
-                              {app.name}
-                            </span>
+              {#key refreshKey}
+                <div 
+                  in:scale={{ duration: 400, start: 0.98, opacity: 0 }}
+                  class="mt-5 flex flex-col gap-3"
+                >
+                  {#if usageTab === "apps"}
+                    {#if usage?.apps.length}
+                      {#each usage.apps.slice(0, 5) as app}
+                        {@const targetRule = getTargetRule(app.name, usageTab)}
+                        <div class="silo-card p-3 flex flex-col gap-2.5 bg-slate-900/30 hover:border-slate-700/80 hover:bg-slate-900/50 transition-all duration-200">
+                          <div class="flex items-center justify-between gap-4">
+                            <!-- Leading: Icon & Name -->
+                            <div class="flex items-center gap-3 min-w-0">
+                              <IconBadge
+                                icon={Monitor}
+                                tone="purple"
+                                label={app.name}
+                                size="md"
+                              />
+                              <div class="min-w-0">
+                                <span class="truncate font-bold text-sm text-slate-200 block" title={app.name}>
+                                  {app.name}
+                                </span>
+                                {#if targetRule}
+                                  <span class="text-[10px] text-slate-500 font-bold mt-0.5 block">
+                                    Limit: {formatDuration(targetRule.limitSeconds)}
+                                  </span>
+                                {:else}
+                                  <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                                    {((app.seconds / Math.max(1, usage.totalSeconds)) * 100).toFixed(0)}% of today
+                                  </span>
+                                {/if}
+                              </div>
+                            </div>
+
+                            <!-- Trailing: Duration & Warning Tier Badge -->
+                            <div class="flex items-center gap-3 shrink-0">
+                              <span class="text-sm font-black text-slate-100 font-mono">
+                                {formatDuration(app.seconds)}
+                              </span>
+                              
+                              {#if targetRule}
+                                {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
+                                <span class="text-[10px] font-black px-2.5 py-1 rounded-full border 
+                                  {remainingSecs <= 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                   remainingSecs <= 60 ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
+                                   remainingSecs <= 300 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                   'bg-teal-500/10 text-teal-300 border-teal-500/20'}">
+                                  {remainingSecs <= 0 ? 'Blocked' :
+                                   remainingSecs <= 60 ? 'Critical' :
+                                   remainingSecs <= 300 ? 'Warning' :
+                                   'Healthy'}
+                                </span>
+                              {/if}
+                            </div>
+                          </div>
+
+                          <!-- Progress Bar of limit or share of total focus -->
+                          <div class="w-full bg-slate-950/80 h-1 rounded-full overflow-hidden border border-slate-900">
                             {#if targetRule}
-                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
-                                Limit: {formatDuration(targetRule.limitSeconds)}
-                              </span>
+                              {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
+                              {@const totalLimit = targetRule.extraLimitDate === new Date().toISOString().slice(0, 10) ? targetRule.limitSeconds + (targetRule.extraLimitSeconds ?? 0) : targetRule.limitSeconds}
+                              {@const usagePct = Math.min(100, ((totalLimit - remainingSecs) / Math.max(1, totalLimit)) * 100)}
+                              <div 
+                                class="h-full rounded-full transition-all duration-500 
+                                  {remainingSecs <= 0 ? 'bg-red-500' :
+                                   remainingSecs <= 300 ? 'bg-amber-500' :
+                                   'bg-teal-500'}"
+                                style={`width: ${usagePct}%`}
+                              ></div>
                             {:else}
-                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
-                                {((app.seconds / Math.max(1, usage.totalSeconds)) * 100).toFixed(0)}% of today's focus
-                              </span>
+                              <div 
+                                class="h-full rounded-full bg-slate-700/60"
+                                style={`width: ${Math.min(100, (app.seconds / Math.max(1, usage?.totalSeconds ?? 1)) * 100)}%`}
+                              ></div>
                             {/if}
                           </div>
                         </div>
-
-                        <!-- Trailing: Duration & Warning Tier Badge -->
-                        <div class="flex items-center gap-3 shrink-0">
-                          <span class="text-sm font-black text-slate-100 font-mono">
-                            {formatDuration(app.seconds)}
-                          </span>
-                          
-                          {#if targetRule}
-                            {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
-                            <span class="text-[10px] font-black px-2.5 py-1 rounded-full border 
-                              {remainingSecs <= 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                               remainingSecs <= 60 ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
-                               remainingSecs <= 300 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                               'bg-teal-500/10 text-teal-300 border-teal-500/20'}">
-                              {remainingSecs <= 0 ? 'Blocked' :
-                               remainingSecs <= 60 ? 'Critical' :
-                               remainingSecs <= 300 ? 'Warning' :
-                               'Healthy'} ({formatDuration(remainingSecs)} left)
-                            </span>
-                          {/if}
-                        </div>
-                      </div>
-                    {/each}
+                      {/each}
+                    {:else}
+                      <EmptyState
+                        compact
+                        icon={Monitor}
+                        title="No usage yet"
+                        message="Tracked applications will appear here."
+                      />
+                    {/if}
                   {:else}
-                    <EmptyState
-                      compact
-                      icon={Monitor}
-                      title="No usage yet"
-                      message="Tracked applications will appear here."
-                    />
-                  {/if}
-                {:else}
-                  {#if usage?.sites?.length}
-                    {#each usage.sites.slice(0, 6) as site}
-                      {@const targetRule = getTargetRule(site.name, usageTab)}
-                      <div class="silo-card p-3 flex items-center justify-between gap-4 bg-slate-900/30 hover:border-slate-700/80 transition-colors">
-                        <!-- Leading: Icon & Name -->
-                        <div class="flex items-center gap-3 min-w-0">
-                          <IconBadge
-                            icon={Globe}
-                            tone="teal"
-                            label={site.name}
-                            size="md"
-                          />
-                          <div class="min-w-0">
-                            <span class="truncate font-bold text-sm text-slate-200 block" title={site.name}>
-                              {site.name}
-                            </span>
+                    {#if usage?.sites?.length}
+                      {#each usage.sites.slice(0, 5) as site}
+                        {@const targetRule = getTargetRule(site.name, usageTab)}
+                        <div class="silo-card p-3 flex flex-col gap-2.5 bg-slate-900/30 hover:border-slate-700/80 hover:bg-slate-900/50 transition-all duration-200">
+                          <div class="flex items-center justify-between gap-4">
+                            <!-- Leading: Icon & Name -->
+                            <div class="flex items-center gap-3 min-w-0">
+                              <IconBadge
+                                icon={Globe}
+                                tone="teal"
+                                label={site.name}
+                                size="md"
+                              />
+                              <div class="min-w-0">
+                                <span class="truncate font-bold text-sm text-slate-200 block" title={site.name}>
+                                  {site.name}
+                                </span>
+                                {#if targetRule}
+                                  <span class="text-[10px] text-slate-500 font-bold mt-0.5 block">
+                                    Limit: {formatDuration(targetRule.limitSeconds)}
+                                  </span>
+                                {:else}
+                                  <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                                    {((site.seconds / Math.max(1, usage.totalSeconds)) * 100).toFixed(0)}% of today
+                                  </span>
+                                {/if}
+                              </div>
+                            </div>
+
+                            <!-- Trailing: Duration & Warning Tier Badge -->
+                            <div class="flex items-center gap-3 shrink-0">
+                              <span class="text-sm font-black text-slate-100 font-mono">
+                                {formatDuration(site.seconds)}
+                              </span>
+                              
+                              {#if targetRule}
+                                {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
+                                <span class="text-[10px] font-black px-2.5 py-1 rounded-full border 
+                                  {remainingSecs <= 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                   remainingSecs <= 60 ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
+                                   remainingSecs <= 300 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                   'bg-teal-500/10 text-teal-300 border-teal-500/20'}">
+                                  {remainingSecs <= 0 ? 'Blocked' :
+                                   remainingSecs <= 60 ? 'Critical' :
+                                   remainingSecs <= 300 ? 'Warning' :
+                                   'Healthy'}
+                                </span>
+                              {/if}
+                            </div>
+                          </div>
+
+                          <!-- Progress Bar of limit or share of total focus -->
+                          <div class="w-full bg-slate-950/80 h-1 rounded-full overflow-hidden border border-slate-900">
                             {#if targetRule}
-                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
-                                Limit: {formatDuration(targetRule.limitSeconds)}
-                              </span>
+                              {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
+                              {@const totalLimit = targetRule.extraLimitDate === new Date().toISOString().slice(0, 10) ? targetRule.limitSeconds + (targetRule.extraLimitSeconds ?? 0) : targetRule.limitSeconds}
+                              {@const usagePct = Math.min(100, ((totalLimit - remainingSecs) / Math.max(1, totalLimit)) * 100)}
+                              <div 
+                                class="h-full rounded-full transition-all duration-500 
+                                  {remainingSecs <= 0 ? 'bg-red-500' :
+                                   remainingSecs <= 300 ? 'bg-amber-500' :
+                                   'bg-teal-500'}"
+                                style={`width: ${usagePct}%`}
+                              ></div>
                             {:else}
-                              <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
-                                {((site.seconds / Math.max(1, usage.totalSeconds)) * 100).toFixed(0)}% of today's focus
-                              </span>
+                              <div 
+                                class="h-full rounded-full bg-slate-700/60"
+                                style={`width: ${Math.min(100, (site.seconds / Math.max(1, usage?.totalSeconds ?? 1)) * 100)}%`}
+                              ></div>
                             {/if}
                           </div>
                         </div>
-
-                        <!-- Trailing: Duration & Warning Tier Badge -->
-                        <div class="flex items-center gap-3 shrink-0">
-                          <span class="text-sm font-black text-slate-100 font-mono">
-                            {formatDuration(site.seconds)}
-                          </span>
-                          
-                          {#if targetRule}
-                            {@const remainingSecs = getRuleRemainingSeconds(targetRule)}
-                            <span class="text-[10px] font-black px-2.5 py-1 rounded-full border 
-                              {remainingSecs <= 0 ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                               remainingSecs <= 60 ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' :
-                               remainingSecs <= 300 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                               'bg-teal-500/10 text-teal-300 border-teal-500/20'}">
-                              {remainingSecs <= 0 ? 'Blocked' :
-                               remainingSecs <= 60 ? 'Critical' :
-                               remainingSecs <= 300 ? 'Warning' :
-                               'Healthy'} ({formatDuration(remainingSecs)} left)
-                            </span>
-                          {/if}
-                        </div>
-                      </div>
-                    {/each}
-                  {:else}
-                    <EmptyState
-                      compact
-                      icon={Globe}
-                      title="No usage yet"
-                      message="Tracked websites will appear here."
-                    />
+                      {/each}
+                    {:else}
+                      <EmptyState
+                        compact
+                        icon={Globe}
+                        title="No usage yet"
+                        message="Tracked websites will appear here."
+                      />
+                    {/if}
                   {/if}
-                {/if}
-              </div>
-            {/key}
+                </div>
+              {/key}
+            </div>
+            
             <div
-              class="mt-6 border-t border-slate-800 pt-4 text-right text-xl font-black text-teal-300"
+              class="mt-6 border-t border-slate-800 pt-4 text-right text-xl font-black text-teal-300 font-mono"
             >
               {formatDuration(usage?.totalSeconds ?? 0)}
             </div>
           </section>
         </div>
       </section>
+
     {:else if activeView === "rules"}
       <section class="mx-auto max-w-5xl space-y-6">
         <header
@@ -1625,148 +2094,629 @@
         </section>
       </section>
     {:else if activeView === "stats"}
-      <section class="mx-auto max-w-6xl space-y-6">
-        <header>
-          <h1 class="text-4xl font-black">Statistics</h1>
-          <p class="mt-2 text-slate-400">Your productivity insights</p>
+      <section class="mx-auto max-w-6xl space-y-6" transition:fade={{ duration: 150 }}>
+        <!-- Header & Top bar -->
+        <header class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-slate-800/60 pb-5">
+          <div>
+            <h1 class="text-4xl font-black tracking-tight text-slate-100 flex items-center gap-3">
+              <ChartColumn class="text-teal-400" size={32} />
+              Statistics &amp; Insights
+            </h1>
+            <p class="mt-1 text-sm text-slate-400">Deep usage insights across applications and sites</p>
+          </div>
+
+          <!-- Time Range Selector -->
+          <div class="flex rounded-xl bg-slate-900/90 border border-slate-800 p-1 w-fit shadow-lg shadow-black/20">
+            {#each [{ key: "today", label: "Today" }, { key: "7d", label: "7 Days" }, { key: "30d", label: "30 Days" }, { key: "90d", label: "90 Days" }] as range}
+              <button
+                class="rounded-lg px-4 py-2 text-xs font-bold transition-all duration-200 {statsRange === range.key
+                  ? 'bg-teal-400 text-slate-950 font-black shadow-md'
+                  : 'text-slate-400 hover:text-slate-100'}"
+                type="button"
+                onclick={() => {
+                  statsRange = range.key as RangeKey;
+                }}
+              >
+                {range.label}
+              </button>
+            {/each}
+          </div>
         </header>
 
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <MetricCard
-            icon={Clock}
-            title="Total Focus Time"
-            value={formatDuration(totalTrackedSeconds())}
-            trend={totalTrackedSeconds() ? "From stored history" : ""}
-          />
-          <MetricCard
-            icon={Target}
-            tone="purple"
-            title="Daily Average"
-            value={formatDuration(averageTrackedSeconds())}
-            trend={averageTrackedSeconds() ? "Active days only" : ""}
-          />
-          <MetricCard
-            icon={Flame}
-            tone="yellow"
-            title="Streak"
-            value="Unavailable"
-            caption="Needs focus-session goals"
-          />
-          <MetricCard
-            icon={Award}
-            tone="yellow"
-            title="Best Day"
-            value={bestTrackedDay().date
-              ? formatDateLabel(bestTrackedDay().date)
-              : "None"}
-            caption={bestTrackedDay().totalSeconds
-              ? formatDuration(bestTrackedDay().totalSeconds)
-              : "No history yet"}
-          />
-          <MetricCard
-            icon={Calendar}
-            tone="blue"
-            title="This Week"
-            value={formatDuration(
-              weekDays().reduce((sum, day) => sum + day.totalSeconds, 0),
-            )}
-            trend={weekDays().length ? "Last 7 days" : ""}
-          />
+        <!-- Sub-navigation Tabs (Screen Time, Network, Habits) -->
+        <div class="flex border-b border-slate-800/80">
+          <button
+            class="px-5 py-3 text-sm font-bold border-b-2 transition-all duration-200 flex items-center gap-2
+              {statsSubTab === 'screentime' ? 'border-teal-400 text-teal-300' : 'border-transparent text-slate-400 hover:text-slate-200'}"
+            type="button"
+            onclick={() => statsSubTab = "screentime"}
+          >
+            <Clock size={16} /> Screen Time
+          </button>
+          <button
+            class="px-5 py-3 text-sm font-bold border-b-2 transition-all duration-200 flex items-center gap-2
+              {statsSubTab === 'network' ? 'border-violet-400 text-violet-300' : 'border-transparent text-slate-400 hover:text-slate-200'}"
+            type="button"
+            onclick={() => statsSubTab = "network"}
+          >
+            <Wifi size={16} /> Network Usage
+          </button>
+          <button
+            class="px-5 py-3 text-sm font-bold border-b-2 transition-all duration-200 flex items-center gap-2
+              {statsSubTab === 'habits' ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-400 hover:text-slate-200'}"
+            type="button"
+            onclick={() => statsSubTab = "habits"}
+          >
+            <Flame size={16} /> Activity &amp; Habits
+          </button>
         </div>
 
-        <section class="silo-card p-6">
-          <div class="flex items-center gap-3">
-            <IconBadge icon={Calendar} tone="teal" label="Activity heatmap" />
-            <div>
-              <h2 class="text-lg font-bold">Activity Heatmap</h2>
-              <p class="text-sm text-slate-500">Last 12 weeks</p>
-            </div>
-          </div>
-          {#if timeline?.days.length}
-            <div class="mt-6 grid max-w-xl grid-flow-col grid-rows-7 gap-2">
-              {#each timeline.days.slice(-84) as day}
-                <span
-                  class="h-3 w-3 rounded-full {day.totalSeconds > 14400
-                    ? 'bg-teal-300'
-                    : day.totalSeconds > 7200
-                      ? 'bg-teal-500'
-                      : day.totalSeconds > 0
-                        ? 'bg-teal-900'
-                        : 'bg-slate-900'}"
-                  title={`${day.date}: ${formatDuration(day.totalSeconds)}`}
-                ></span>
-              {/each}
-            </div>
-            <div
-              class="mt-5 flex max-w-xl items-center justify-between text-xs text-slate-500"
-            >
-              <span>Less</span>
-              <span>More</span>
-            </div>
-          {:else}
-            <EmptyState
-              icon={Calendar}
-              title="No heatmap data"
-              message="Daily activity dots will appear once sessions are recorded."
-            />
-          {/if}
-        </section>
-
-        <section class="silo-card p-6">
-          <div class="flex items-center justify-between gap-4">
-            <h2 class="text-lg font-bold">Time Analysis</h2>
-            <span
-              class="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300"
-              >Week</span
-            >
-          </div>
-          {#if weekDays().length}
-            <div class="mt-6">
-              <TrendChart
-                labels={chartLabels()}
-                datasets={focusChartData()}
-                height={330}
+        {#if statsSubTab === "screentime"}
+          <!-- Screen Time Insights Subtab -->
+          <div class="space-y-6" transition:fade={{ duration: 100 }}>
+            <!-- Screen Time Metrics -->
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                icon={Clock}
+                title="Total Screen Time"
+                value={formatDuration(statsUsage?.totalSeconds ?? 0)}
+                trend={`Total for ${statsRange === 'today' ? 'today' : statsRange}`}
+              />
+              <MetricCard
+                icon={Monitor}
+                tone="purple"
+                title="Active Applications"
+                value={String(statsUsage?.apps.length ?? 0)}
+                caption="Attributed local apps"
+              />
+              <MetricCard
+                icon={Globe}
+                tone="blue"
+                title="Active Websites"
+                value={String(statsUsage?.sites?.length ?? 0)}
+                caption="Attributed web domains"
+              />
+              <MetricCard
+                icon={Award}
+                tone="yellow"
+                title="Top Time Sink"
+                value={statsScreenTab === 'apps' 
+                  ? (statsUsage?.apps[0]?.name || "None") 
+                  : (statsUsage?.sites?.[0]?.name || "None")}
+                caption={statsScreenTab === 'apps'
+                  ? (statsUsage?.apps[0] ? formatDuration(statsUsage.apps[0].seconds) : "No app logged")
+                  : (statsUsage?.sites?.[0] ? formatDuration(statsUsage.sites[0].seconds) : "No site logged")}
               />
             </div>
-          {:else}
-            <EmptyState
-              icon={ChartColumn}
-              title="No time analysis yet"
-              message="The weekly chart will populate from usage history."
-            />
-          {/if}
-        </section>
 
-        <section class="silo-card p-6">
-          <h2 class="text-lg font-bold">Most Used Apps</h2>
-          <div class="mt-5 space-y-4">
-            {#if usage?.apps.length}
-              {#each usage.apps.slice(0, 6) as app}
-                <div>
-                  <div class="flex items-center justify-between gap-3">
-                    <span class="truncate font-semibold">{app.name}</span>
-                    <span class="text-sm text-slate-400"
-                      >{formatDuration(app.seconds)}</span
-                    >
-                  </div>
-                  <div class="mt-2 h-2 rounded-full bg-slate-800">
-                    <div
-                      class="h-2 rounded-full bg-blue-400"
-                      style={`width: ${Math.max(4, Math.min(100, (app.seconds / Math.max(1, usage.totalSeconds)) * 100))}%`}
-                    ></div>
+            <!-- Screen Time Grid Breakdown -->
+            <section class="silo-card p-6">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/60 pb-4">
+                <div class="flex items-center gap-3">
+                  <IconBadge icon={ChartColumn} tone="teal" label="Focus Breakdown" />
+                  <div>
+                    <h2 class="text-lg font-bold">Focus Breakdown</h2>
+                    <p class="text-sm text-slate-500">Compare application vs browser domain screen time</p>
                   </div>
                 </div>
-              {/each}
-            {:else}
-              <EmptyState
-                compact
-                icon={Monitor}
-                title="No app usage today"
-                message="Applications will appear after SILO tracks them."
-              />
-            {/if}
+
+                <!-- Apps/Sites sub-toggle -->
+                <div class="flex rounded-lg bg-slate-950 p-1">
+                  <button
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition
+                      {statsScreenTab === 'apps' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                    type="button"
+                    onclick={() => { statsScreenTab = "apps"; statsSearch = ""; }}
+                  >
+                    Applications
+                  </button>
+                  <button
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition
+                      {statsScreenTab === 'sites' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                    type="button"
+                    onclick={() => { statsScreenTab = "sites"; statsSearch = ""; }}
+                  >
+                    Websites
+                  </button>
+                </div>
+              </div>
+
+              <!-- Search filter inside stats list -->
+              <div class="mt-5 relative w-full">
+                <Search
+                  class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                  size={16}
+                />
+                <input
+                  class="silo-input pl-10 w-full"
+                  placeholder={`Search ${statsScreenTab === 'apps' ? 'applications' : 'websites'}...`}
+                  bind:value={statsSearch}
+                />
+              </div>
+
+              <!-- List with bars -->
+              <div class="mt-5 space-y-3">
+                {#if filteredStatsScreenList.length}
+                  {#each paginatedStatsScreenList as item, index}
+                    {@const percentage = ((item.seconds / Math.max(1, statsUsage?.totalSeconds ?? 0)) * 100).toFixed(0)}
+                    {@const isApp = statsScreenTab === "apps"}
+                    {@const ruleTarget = isApp ? item.name : cleanDomain(item.name)}
+                    {@const targetRule = getTargetRule(ruleTarget, statsScreenTab)}
+
+                    <div class="silo-card p-3.5 flex flex-col gap-3 bg-slate-900/30 hover:border-slate-700/80 transition-colors">
+                      <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-3 min-w-0">
+                          <IconBadge
+                            icon={isApp ? Monitor : Globe}
+                            tone={isApp ? "purple" : "teal"}
+                            label={item.name}
+                            size="md"
+                          />
+                          <div class="min-w-0">
+                            <span class="truncate font-bold text-sm text-slate-200 block" title={item.name}>
+                              {item.name}
+                            </span>
+                            <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                              {percentage}% of range screen time
+                            </span>
+                          </div>
+                        </div>
+
+                        <!-- Time & Actions -->
+                        <div class="flex items-center gap-3 shrink-0">
+                          <span class="text-sm font-black text-slate-100 font-mono">
+                            {formatDuration(item.seconds)}
+                          </span>
+
+                          {#if targetRule}
+                            <span class="text-[10px] font-black px-2 py-0.5 rounded-full border bg-teal-500/10 text-teal-300 border-teal-500/20">
+                              Limited
+                            </span>
+                          {:else}
+                            <!-- Action button to immediately create a rule! -->
+                            <button
+                              class="silo-icon-button p-1.5 text-slate-500 hover:text-teal-400 hover:bg-slate-800 rounded transition"
+                              type="button"
+                              title={`Create rule limit for ${item.name}`}
+                              onclick={() => {
+                                ruleDraft = {
+                                  ...emptyRule(),
+                                  ruleType: isApp ? "app" : "site",
+                                  target: ruleTarget
+                                };
+                                showRuleForm = true;
+                                activeView = "rules";
+                              }}
+                            >
+                              <Plus size={15} />
+                            </button>
+                          {/if}
+                        </div>
+                      </div>
+
+                      <!-- Progress Indicator -->
+                      <div class="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          class="h-full rounded-full bg-gradient-to-r {isApp ? 'from-purple-500 to-teal-400' : 'from-teal-500 to-emerald-400'}"
+                          style={`width: ${Math.max(4, Math.min(100, (item.seconds / Math.max(1, statsUsage?.totalSeconds ?? 0)) * 100))}%`}
+                        ></div>
+                      </div>
+                    </div>
+                  {/each}
+
+                  <!-- Pagination Controller -->
+                  {#if totalScreenPages > 1}
+                    <div class="flex items-center justify-between border-t border-slate-800/60 pt-4 mt-2">
+                      <button
+                        class="silo-button-secondary bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs rounded-lg transition disabled:opacity-40 disabled:hover:bg-slate-800"
+                        type="button"
+                        disabled={screenTimePage === 1}
+                        onclick={() => screenTimePage -= 1}
+                      >
+                        Previous
+                      </button>
+                      <span class="text-xs text-slate-400 font-semibold">
+                        Page {screenTimePage} of {totalScreenPages}
+                      </span>
+                      <button
+                        class="silo-button-secondary bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs rounded-lg transition disabled:opacity-40 disabled:hover:bg-slate-800"
+                        type="button"
+                        disabled={screenTimePage === totalScreenPages}
+                        onclick={() => screenTimePage += 1}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  {/if}
+                {:else}
+                  <EmptyState
+                    compact
+                    icon={Search}
+                    title="No records found"
+                    message="No tracking records found for this period."
+                  />
+                {/if}
+              </div>
+            </section>
           </div>
-        </section>
+
+        {:else if statsSubTab === "network"}
+          <!-- Network Usage Insights Subtab -->
+          <div class="space-y-6" transition:fade={{ duration: 100 }}>
+            <!-- Network Metrics -->
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                icon={Wifi}
+                title="Total Network Data"
+                value={formatBytes((statsDataUsage?.totalDownloadBytes ?? 0) + (statsDataUsage?.totalUploadBytes ?? 0))}
+                trend={`Total for ${statsRange}`}
+              />
+              <MetricCard
+                icon={Download}
+                tone="teal"
+                title="Download Bytes"
+                value={formatBytes(statsDataUsage?.totalDownloadBytes ?? 0)}
+                caption="Total data received"
+              />
+              <MetricCard
+                icon={Upload}
+                tone="purple"
+                title="Upload Bytes"
+                value={formatBytes(statsDataUsage?.totalUploadBytes ?? 0)}
+                caption="Total data sent"
+              />
+              <MetricCard
+                icon={Award}
+                tone="yellow"
+                title="Top Network App"
+                value={statsNetworkTab === 'apps'
+                  ? (statsDataUsage?.apps[0]?.name || "None")
+                  : (statsDataUsage?.sites[0]?.name || "None")}
+                caption={statsNetworkTab === 'apps'
+                  ? (statsDataUsage?.apps[0] ? formatBytes(consumerTotal(statsDataUsage.apps[0])) : "No data")
+                  : (statsDataUsage?.sites[0] ? formatBytes(consumerTotal(statsDataUsage.sites[0])) : "No data")}
+              />
+            </div>
+
+            <!-- Network History Chart -->
+            <section class="silo-card p-6">
+              <div class="flex items-center justify-between border-b border-slate-800/60 pb-4 mb-5">
+                <div>
+                  <h2 class="text-lg font-bold">Network Volume Trend</h2>
+                  <p class="text-sm text-slate-500">Daily upload and download size trend</p>
+                </div>
+                <span class="text-xs text-slate-400 px-2.5 py-1 rounded-full border border-slate-800 bg-slate-900/50">
+                  History: {statsRange}
+                </span>
+              </div>
+              
+              {#if statsNetworkHistory.length}
+                <div class="mt-4">
+                  <TrendChart
+                    labels={statsNetworkHistory.map(day => formatDateLabel(day.date))}
+                    datasets={[
+                      {
+                        label: "Upload (MB)",
+                        data: statsNetworkHistory.map(day => Math.round(day.uploadBytes / 1_048_576)),
+                        backgroundColor: "rgba(139, 92, 246, 0.85)",
+                        borderColor: "#a78bfa",
+                        borderRadius: 4,
+                      },
+                      {
+                        label: "Download (MB)",
+                        data: statsNetworkHistory.map(day => Math.round(day.downloadBytes / 1_048_576)),
+                        backgroundColor: "rgba(20, 184, 166, 0.85)",
+                        borderColor: "#2dd4bf",
+                        borderRadius: 4,
+                      }
+                    ]}
+                    type="bar"
+                    height={250}
+                  />
+                </div>
+              {:else}
+                <EmptyState
+                  icon={Wifi}
+                  title="No trend data available"
+                  message="Trend chart will populate once background network activity is logged."
+                />
+              {/if}
+            </section>
+
+            <!-- Network breakdown list -->
+            <section class="silo-card p-6">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/60 pb-4">
+                <div class="flex items-center gap-3">
+                  <IconBadge icon={Database} tone="purple" label="Network Consumers" />
+                  <div>
+                    <h2 class="text-lg font-bold">Attributed Traffic</h2>
+                    <p class="text-sm text-slate-500">Bandwidth consumers logged during sample intervals</p>
+                  </div>
+                </div>
+
+                <!-- subtoggle -->
+                <div class="flex rounded-lg bg-slate-950 p-1">
+                  <button
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition
+                      {statsNetworkTab === 'apps' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                    type="button"
+                    onclick={() => { statsNetworkTab = "apps"; statsSearch = ""; }}
+                  >
+                    Applications
+                  </button>
+                  <button
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition
+                      {statsNetworkTab === 'sites' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                    type="button"
+                    onclick={() => { statsNetworkTab = "sites"; statsSearch = ""; }}
+                  >
+                    Websites
+                  </button>
+                </div>
+              </div>
+
+              <!-- Search -->
+              <div class="mt-5 relative w-full">
+                <Search
+                  class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                  size={16}
+                />
+                <input
+                  class="silo-input pl-10 w-full"
+                  placeholder={`Search traffic by ${statsNetworkTab === 'apps' ? 'apps' : 'domain'}...`}
+                  bind:value={statsSearch}
+                />
+              </div>
+
+              <!-- List -->
+              <div class="mt-5 space-y-3">
+                {#if filteredStatsNetworkList.length}
+                  {#each paginatedStatsNetworkList as row}
+                    {@const totalBytes = consumerTotal(row)}
+                    {@const rangeTotal = (statsDataUsage?.totalDownloadBytes ?? 0) + (statsDataUsage?.totalUploadBytes ?? 0)}
+                    {@const percentage = ((totalBytes / Math.max(1, rangeTotal)) * 100).toFixed(0)}
+
+                    <div class="silo-card p-3.5 flex flex-col gap-3 bg-slate-900/30 hover:border-slate-700/80 transition-colors">
+                      <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-3 min-w-0">
+                          <IconBadge
+                            icon={statsNetworkTab === 'apps' ? Monitor : Globe}
+                            tone="purple"
+                            label={row.name}
+                            size="md"
+                          />
+                          <div class="min-w-0">
+                            <span class="truncate font-bold text-sm text-slate-200 block" title={row.name}>
+                              {row.name}
+                            </span>
+                            <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                              Down: {formatBytes(row.downloadBytes)} · Up: {formatBytes(row.uploadBytes)}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="text-right shrink-0">
+                          <span class="text-sm font-black text-slate-100 font-mono block">
+                            {formatBytes(totalBytes)}
+                          </span>
+                          <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                            {percentage}% of total
+                          </span>
+                        </div>
+                      </div>
+
+                      <div class="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          class="h-full rounded-full bg-gradient-to-r from-violet-500 to-teal-400"
+                          style={`width: ${Math.max(4, Math.min(100, (totalBytes / Math.max(1, rangeTotal)) * 100))}%`}
+                        ></div>
+                      </div>
+                    </div>
+                  {/each}
+
+                  <!-- Pagination Controller -->
+                  {#if totalNetworkPages > 1}
+                    <div class="flex items-center justify-between border-t border-slate-800/60 pt-4 mt-2">
+                      <button
+                        class="silo-button-secondary bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs rounded-lg transition disabled:opacity-40 disabled:hover:bg-slate-800"
+                        type="button"
+                        disabled={networkPage === 1}
+                        onclick={() => networkPage -= 1}
+                      >
+                        Previous
+                      </button>
+                      <span class="text-xs text-slate-400 font-semibold">
+                        Page {networkPage} of {totalNetworkPages}
+                      </span>
+                      <button
+                        class="silo-button-secondary bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs rounded-lg transition disabled:opacity-40 disabled:hover:bg-slate-800"
+                        type="button"
+                        disabled={networkPage === totalNetworkPages}
+                        onclick={() => networkPage += 1}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  {/if}
+                {:else}
+                  <EmptyState
+                    compact
+                    icon={Search}
+                    title="No traffic records"
+                    message="No bandwidth consumption logged."
+                  />
+                {/if}
+              </div>
+            </section>
+          </div>
+
+        {:else if statsSubTab === "habits"}
+          <!-- Productivity Habits Subtab -->
+          <div class="space-y-6" transition:fade={{ duration: 100 }}>
+            <!-- Habits Summary grid -->
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                icon={Flame}
+                tone="yellow"
+                title="Active Streaks"
+                value={String(timeline?.days.filter(d => d.totalSeconds > 0).length ?? 0)}
+                caption="Total logged days"
+              />
+              <MetricCard
+                icon={Target}
+                tone="purple"
+                title="Average Daily Time"
+                value={formatDuration(averageTrackedSeconds())}
+                caption="Across active days"
+              />
+              <MetricCard
+                icon={Award}
+                tone="yellow"
+                title="Top Productive Day"
+                value={bestTrackedDay().date ? formatDateLabel(bestTrackedDay().date) : "None"}
+                caption={bestTrackedDay().totalSeconds ? formatDuration(bestTrackedDay().totalSeconds) : "No data"}
+              />
+              <MetricCard
+                icon={Calendar}
+                tone="blue"
+                title="Days Tracked"
+                value={String(timeline?.days.length ?? 0)}
+                caption="Total database span"
+              />
+            </div>
+
+            <!-- Heatmap section: Screen Time vs Network Usage -->
+            <section class="silo-card p-6">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/60 pb-4 mb-6">
+                <div class="flex items-center gap-3">
+                  <IconBadge icon={Calendar} tone="teal" label="Activity Calendar" />
+                  <div>
+                    <h2 class="text-lg font-bold">Activity Heatmap</h2>
+                    <p class="text-sm text-slate-500">Visualize daily usage habits for the last 12 weeks</p>
+                  </div>
+                </div>
+
+                <!-- Heatmap toggle tabs -->
+                <div class="flex rounded-lg bg-slate-950 p-1">
+                  <button
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition
+                      {heatmapTab === 'screentime' ? 'bg-teal-500/20 text-teal-300' : 'text-slate-400 hover:text-slate-200'}"
+                    type="button"
+                    onclick={() => heatmapTab = "screentime"}
+                  >
+                    Screen Time
+                  </button>
+                  <button
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold transition
+                      {heatmapTab === 'network' ? 'bg-violet-500/20 text-violet-300' : 'text-slate-400 hover:text-slate-200'}"
+                    type="button"
+                    onclick={() => heatmapTab = "network"}
+                  >
+                    Network Traffic
+                  </button>
+                </div>
+              </div>
+
+              {#if heatmapTab === 'screentime'}
+                <!-- Screen Time Heatmap -->
+                {#if timeline?.days.length}
+                  <div class="mt-4 flex flex-col justify-center items-center">
+                    <div class="grid grid-flow-col grid-rows-7 gap-2">
+                      {#each timeline.days.slice(-84) as day}
+                        <span
+                          class="h-3.5 w-3.5 rounded-sm transition-all duration-200 hover:scale-125 hover:ring-2 hover:ring-teal-400/50
+                            {day.totalSeconds > 14400
+                              ? 'bg-teal-300 shadow-[0_0_6px_rgba(45,212,191,0.4)]'
+                              : day.totalSeconds > 7200
+                                ? 'bg-teal-500'
+                                : day.totalSeconds > 0
+                                  ? 'bg-teal-900'
+                                  : 'bg-slate-900'}"
+                          title={`${day.date}: ${formatDuration(day.totalSeconds)} focus time`}
+                        ></span>
+                      {/each}
+                    </div>
+                    <div class="mt-5 flex w-full max-w-sm items-center justify-between text-xs text-slate-500 px-2">
+                      <span>Less (0m)</span>
+                      <div class="flex gap-1">
+                        <span class="h-3 w-3 bg-slate-900 rounded-sm"></span>
+                        <span class="h-3 w-3 bg-teal-900 rounded-sm"></span>
+                        <span class="h-3 w-3 bg-teal-500 rounded-sm"></span>
+                        <span class="h-3 w-3 bg-teal-300 rounded-sm"></span>
+                      </div>
+                      <span>More (4h+)</span>
+                    </div>
+                  </div>
+                {:else}
+                  <EmptyState
+                    icon={Calendar}
+                    title="No heatmap data"
+                    message="Heatmap dots will appear once focus sessions are recorded."
+                  />
+                {/if}
+              {:else}
+                <!-- Network Heatmap -->
+                {#if heatmapNetworkHistory.length}
+                  <div class="mt-4 flex flex-col justify-center items-center">
+                    <div class="grid grid-flow-col grid-rows-7 gap-2">
+                      {#each heatmapNetworkHistory.slice(-84) as day}
+                        {@const dayBytes = day.downloadBytes + day.uploadBytes}
+                        <span
+                          class="h-3.5 w-3.5 rounded-sm transition-all duration-200 hover:scale-125 hover:ring-2 hover:ring-violet-400/50
+                            {getNetworkHeatmapColor(dayBytes)}"
+                          title={`${day.date}: ${formatBytes(dayBytes)} total data`}
+                        ></span>
+                      {/each}
+                    </div>
+                    <div class="mt-5 flex w-full max-w-sm items-center justify-between text-xs text-slate-500 px-2">
+                      <span>Less (0B)</span>
+                      <div class="flex gap-1">
+                        <span class="h-3 w-3 bg-slate-900 rounded-sm"></span>
+                        <span class="h-3 w-3 bg-violet-900 rounded-sm"></span>
+                        <span class="h-3 w-3 bg-violet-500 rounded-sm"></span>
+                        <span class="h-3 w-3 bg-violet-300 rounded-sm"></span>
+                      </div>
+                      <span>More (1GB+)</span>
+                    </div>
+                  </div>
+                {:else}
+                  <EmptyState
+                    icon={Calendar}
+                    title="No network heatmap data"
+                    message="Heatmap dots will appear once network activity is recorded."
+                  />
+                {/if}
+              {/if}
+            </section>
+
+            <!-- Focus Time weekly analysis -->
+            <section class="silo-card p-6">
+              <div class="flex items-center justify-between border-b border-slate-800/60 pb-4 mb-5">
+                <div>
+                  <h2 class="text-lg font-bold">Focus Trend</h2>
+                  <p class="text-sm text-slate-500">Weekly tracked screen time (minutes)</p>
+                </div>
+                <span class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300">
+                  Last 7 Days
+                </span>
+              </div>
+              {#if weekDays().length}
+                <div class="mt-6">
+                  <TrendChart
+                    labels={chartLabels()}
+                    datasets={focusChartData()}
+                    height={300}
+                  />
+                </div>
+              {:else}
+                <EmptyState
+                  icon={ChartColumn}
+                  title="No focus trends"
+                  message="Trend chart will populate once sessions are logged."
+                />
+              {/if}
+            </section>
+          </div>
+        {/if}
       </section>
     {:else if activeView === "network"}
       <section class="mx-auto max-w-6xl space-y-6">
@@ -2438,6 +3388,13 @@
               (checked) =>
                 (settings = { ...settings!, notificationsEnabled: checked }),
             )}
+            {@render SettingToggle(
+              "Keyboard Shortcuts",
+              "Use keyboard keys for navigation and controls",
+              settings.shortcutsEnabled,
+              (checked) =>
+                (settings = { ...settings!, shortcutsEnabled: checked }),
+            )}
           </div>
         </section>
 
@@ -2536,20 +3493,49 @@
         </section>
 
         <section class="silo-card p-6">
-          <div class="flex items-center gap-3">
-            <IconBadge
-              icon={Keyboard}
-              tone="neutral"
-              label="Keyboard shortcuts"
-            />
-            <h2 class="text-lg font-bold">Keyboard Shortcuts</h2>
+          <div class="flex items-center justify-between gap-3 border-b border-slate-800/60 pb-4 mb-5">
+            <div class="flex items-center gap-3">
+              <IconBadge
+                icon={Keyboard}
+                tone="neutral"
+                label="Keyboard shortcuts"
+              />
+              <div>
+                <h2 class="text-lg font-bold">Keyboard Shortcuts</h2>
+                <p class="text-xs text-slate-500">Quickly navigate and control SILO</p>
+              </div>
+            </div>
+            <span class="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border 
+              {settings.shortcutsEnabled ? 'bg-teal-500/10 text-teal-300 border-teal-500/20' : 'bg-slate-800 text-slate-400 border-transparent'}">
+              {settings.shortcutsEnabled ? 'Enabled' : 'Disabled'}
+            </span>
           </div>
-          <EmptyState
-            compact
-            icon={Keyboard}
-            title="Shortcut registration pending"
-            message="Global hotkeys are part of the later tray and system integration phase."
-          />
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            {#each [
+              { keys: ["D", "1"], desc: "Go to Dashboard" },
+              { keys: ["R", "2"], desc: "Go to Rules & Limits" },
+              { keys: ["S", "3"], desc: "Go to Statistics" },
+              { keys: ["N", "4"], desc: "Go to Network Usage" },
+              { keys: ["P", "5"], desc: "Go to Settings" },
+              { keys: ["Space"], desc: "Toggle Focus Mode" },
+              { keys: ["Esc"], desc: "Close drawers / Blur / Overlays" }
+            ] as shortcut}
+              <div class="flex items-center justify-between p-3 rounded-lg bg-slate-950/45 border border-slate-900">
+                <span class="text-sm text-slate-300 font-semibold">{shortcut.desc}</span>
+                <div class="flex items-center gap-1 shrink-0">
+                  {#each shortcut.keys as key, i}
+                    {#if i > 0}
+                      <span class="text-[10px] text-slate-600 font-extrabold">/</span>
+                    {/if}
+                    <kbd class="px-2 py-1 text-xs font-black font-mono bg-slate-800 border border-slate-700/80 rounded shadow-md text-slate-100 min-w-[24px] text-center block">
+                      {key}
+                    </kbd>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
         </section>
 
         <section class="flex justify-end">

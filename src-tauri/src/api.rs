@@ -210,9 +210,21 @@ pub fn get_network_history(state: State<'_, AppState>, range: String) -> Command
     let days = match range.as_str() {
         "7d" => 7,
         "30d" => 30,
+        "90d" => 90,
         _ => 7,
     };
     state.storage().network_usage_history(days).map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn get_usage_range(
+    state: State<'_, AppState>,
+    range: String,
+) -> CommandResult<crate::models::UsageReport> {
+    state
+        .storage()
+        .usage_range_report(&range)
+        .map_err(to_command_error)
 }
 
 #[derive(Clone, Debug, Serialize)]

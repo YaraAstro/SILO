@@ -7,7 +7,7 @@ use api::{
     delete_rule, export_logs, export_usage_data, get_app_state, get_data_usage, get_network_speed,
     get_rules, get_settings, get_usage, get_usage_90d, handshake, mark_backup_complete, save_rule,
     save_settings, start_focus_mode, stop_focus_mode, toggle_focus_mode, get_available_apps,
-    get_network_history, add_rule_time,
+    get_network_history, add_rule_time, get_usage_range,
 };
 use models::AppReadyEvent;
 use monitor::{Monitor, NetworkMonitor};
@@ -779,7 +779,8 @@ pub fn run() {
             mark_backup_complete,
             get_available_apps,
             get_network_history,
-            add_rule_time
+            add_rule_time,
+            get_usage_range
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
