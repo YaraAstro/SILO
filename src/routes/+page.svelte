@@ -1278,7 +1278,7 @@
             <div class="flex items-center gap-2.5 bg-slate-900/60 px-4 py-2 rounded-2xl border border-slate-800/50">
               <span class="text-xl font-extrabold bg-gradient-to-r from-teal-300 via-blue-400 to-violet-400 bg-clip-text text-transparent tracking-wider">SILO</span>
               <span class="h-4 w-px bg-slate-800"></span>
-              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">v{boot?.version || "0.3.0"}</span>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">v{boot?.version || "0.4.0"}</span>
             </div>
           </div>
 

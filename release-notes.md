@@ -1,63 +1,78 @@
-# SILO Pre-release v0.2.0-preview
+# SILO Release Notes v0.4.0
 
-Welcome to **SILO v0.2.0-preview**! This release marks a major milestone, introducing system tray integration for background monitoring and deep-dive network metrics dashboards. 
+Welcome to **SILO v0.4.0**! This major release delivers a premium dashboard UI/UX overhaul, deep range-based screen time and network analytics, list pagination, and a global keyboard shortcut system for fluid navigation.
 
-Below is a summary of the new features, user experience updates, and configuration details for this pre-release.
+Below is a summary of the new features, visual improvements, and configuration details for this release.
 
 ---
 
 ## 🚀 Key Highlights
 
-### 1. System Tray & Seamless Background Processing
-SILO now runs as a persistent background service to continuously monitor activity and enforce rules without occupying space on your taskbar.
-* **Hide-on-Close Behavior**: Clicking the close window button (`[X]`) now hides the window to the system tray instead of closing the application.
-* **Left-click Toggle**: Click the system tray icon to quickly toggle the window between visible/focused and hidden states.
-* **Right-click Context Menu**:
-  * **Show SILO**: Restores and focuses the main window.
-  * **Add Rule**: Instantly focuses the window and navigates directly to the **Rules & Limits** section.
-  * **Start / Stop Focus Mode**: A context-aware toggle allowing you to activate/deactivate Focus Mode directly from the tray.
-  * **Quit**: Fully exits the application and shuts down background tasks.
-* **Bidirectional Sync**: Real-time listeners automatically update the tray menu item label (e.g., changing from "Start Focus Mode" to "Stop Focus Mode") when toggled from the in-app dashboard.
+### 1. Immersive Dashboard UI/UX Redesign
+The primary dashboard has been redesigned to feel highly interactive, responsive, and visual:
+* **Time-of-day Greetings & Clock Header**: Dynamically greets you (e.g., "Good Morning", "Good Evening") based on the system hour, featuring a formatted local date and version sub-badge.
+* **Reactive Focus Shield state**: The header glassmorphism border and background glow transition smoothly between teal/purple (monitoring suspended) and rose/red (monitoring active) with a pulsing power toggle button.
+* **Dynamic Live Focus Score SVG**: Shows your live focus score inside a circular SVG ring driven by a color-coded gradient (Teal for Optimal, Blue for Good, Amber for Moderate, Rose for Distracted) accompanied by a neon glow filter.
+* **Speed Shimmer Indicators**: Shimmering flow-lines track network download/upload speeds in real time, animating active traffic.
+* **Visual Progress Bars**: App and website lists on the dashboard now embed progress meters indicating the remaining focus budget (green to red) or percentage share of total daily screen time.
 
-### 2. Advanced Network Analytics & Detail Sub-screens
-To prevent dashboard clutter, the main network tab has been optimized, and new dedicated analytics views have been added.
-* **5-Item Widget Limits**: The "Top Apps" and "Top Sites" widgets on the Network tab now display the top 5 consumers, keeping the main dashboard clean.
-* **Dedicated Analytics Screens**: Interactive, full-page sub-screens are now accessible via **More** buttons for both top apps and top sites.
-* **Multi-period Time Ranges**: View bandwidth metrics filtered by **Today** (1-day query), **Last 7 Days**, or **Last 30 Days**.
-* **Bandwidth Metrics Grid**: Comprehensive overview cards showing *Total*, *Download*, and *Upload* data usage for the selected period.
-* **Visual Usage Gradients**: Rich progress bars with color gradients representing the percentage share of each item's bandwidth consumption relative to the top consumer.
-* **Real-time Filter**: An instant search input to quickly isolate specific applications or website domains.
+### 2. Deep Usage & Screen Time Insights (Stats Tab)
+The **Stats** view has been upgraded into a comprehensive usage hub:
+* **Interactive Range Queries**: Query screen time and network volumes grouped by application or site domain over multiple time ranges (**Today**, **7 Days**, **30 Days**, **90 Days**).
+* **Productivity Patterns & Habits**: Features focus streak counters, average focused hours, best-tracked days, and dual visual heatmaps tracking historical screen time and network volume patterns.
+* **Quick Rule Setup**: Click the `+` action button on any highly-used app or site card to immediately slide open the rule limit drawer with target names pre-filled.
+
+### 3. Global In-App Keyboard Shortcuts
+You can now navigate and control SILO entirely via keyboard hotkeys:
+* **Hotkey Navigation mappings**: 
+  * `D` or `1`: Go to **Dashboard**
+  * `R` or `2`: Go to **Rules**
+  * `S` or `3`: Go to **Stats**
+  * `N` or `4`: Go to **Network**
+  * `P` or `5` or `,`: Go to **Settings**
+* **Quick Actions**: 
+  * `Spacebar`: Toggle Focus Shield active state
+  * `Escape`: Instantly exit drawers, overlay menus, or remove text input focus.
+* **Intelligent Focus Detection**: Smart filters ignore navigation inputs while typing inside rule forms, searches, or other input controls.
+* **Keyboard Settings Toggle**: Enable or disable shortcuts via Settings, featuring a keycap visual dashboard panel summarizing active hotkeys.
+
+### 4. Smart List Pagination
+To prevent scrolling lag and optimize visual structure, pagination controls have been added to:
+* **Focus Breakdown** (Stats tab)
+* **Attributed Traffic** (Stats tab)
+* Page size is capped at **5 rows** per page with dynamic total page indicators and disabled control boundaries.
 
 ---
 
 ## 🛠️ Code Changes & Affected Files
 
-The implementation spans both the Rust/Tauri backend and the Svelte frontend:
-
 | Component | File Path | Description |
 | :--- | :--- | :--- |
-| **Backend Config** | [`Cargo.toml`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/Cargo.toml) | Enabled `tray-icon` and `image-png` features for Tauri. |
-| **Backend Core** | [`src/lib.rs`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/src/lib.rs) | Created system tray icon, set up context menu handlers, registered close-to-tray window events, and synced focus mode events. |
-| **Storage Layer** | [`src/storage.rs`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/src/storage.rs) | Updated SQLite data queries to accurately map "Today" to current-day metrics. |
-| **Frontend UI** | [`src/routes/+page.svelte`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src/routes/+page.svelte) | Designed Svelte state handlers, sub-screen layouts, search filter logics, and range toggle APIs. Added `"navigate"` listener to handle tray shortcuts. |
+| **Workspace Manifests** | [`package.json`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/package.json) | Bumped package version to `0.4.0`. |
+| **Backend Manifests** | [`Cargo.toml`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/Cargo.toml) | Bumped package version to `0.4.0`. |
+| **Tauri Core Configurations**| [`tauri.conf.json`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/tauri.conf.json) | Bumped application build version to `0.4.0`. |
+| **Storage layer** | [`src-tauri/src/storage.rs`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/src/storage.rs) | Created `usage_range_report` to query and sum range stats; added `shortcuts_enabled` columns database persistence. |
+| **Tauri Handlers** | [`src-tauri/src/api.rs`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/src/api.rs)<br>[`src-tauri/src/lib.rs`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/src/lib.rs) | Exposed the `get_usage_range` handler command to frontend clients. |
+| **API Typings** | [`src/lib/siloApi.ts`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src/lib/siloApi.ts) | Implemented client invoker wrappers for `getUsageRange` and shortcuts settings attributes. |
+| **Global Typography Styles** | [`src/app.css`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src/app.css) | Embedded `animate-shimmer`, `animate-radar`, and `animate-pulse-glow` micro-interaction classes. |
+| **Dashboard & Layout** | [`src/routes/+page.svelte`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src/routes/+page.svelte) | Implemented Svelte 5 derived state logic, global key handlers, pagination systems, custom speedometer SVG graphics, time greetings, and stats sub-screens. |
 
 ---
 
-## 📝 How to Test the Pre-release
+## 📝 How to Test the Release
 
-To run and verify the new features in your local environment, follow these steps:
-
-1. **Launch the Development Server**:
+1. **Start development app**:
    ```bash
    pnpm tauri dev
    ```
-2. **Verify System Tray Backgrounding**:
-   * Click the close (`[X]`) button. The window should hide.
-   * Verify that the SILO icon is active in your Windows System Tray.
-   * Left-click the tray icon to restore the window.
-3. **Verify Context Shortcuts**:
-   * Right-click the tray icon and select **Add Rule**. The app window should restore and show the **Rules** tab.
-   * Right-click the tray icon and select **Start Focus Mode**. Toggle the window open and verify that the Focus button on the dashboard updates accordingly.
-4. **Inspect Network Sub-screens**:
-   * Open the **Network** dashboard and select **More Top Apps** or **More Top Sites**.
-   * Test the search input and date filter tabs (**Today**, **7 Days**, **30 Days**) to verify SQLite database query integration.
+2. **Test Dashboard UI/UX**:
+   * Verify time greetings change based on time (e.g., Good Morning/Afternoon/Evening).
+   * Toggle Focus Mode and observe colors changing between teal (suspended) and pulsing red (active).
+   * Verify the circular focus meter updates dynamically relative to remaining rule limits.
+3. **Verify Keyboard Navigation**:
+   * Navigate between tabs using keys `1`, `2`, `3`, `4`, `5`.
+   * Open the Rule Form drawer and ensure pressing `1`, `2`, etc., inputs numbers without triggering navigation shortcuts.
+   * Press `Escape` to close drawers.
+4. **Inspect Stats range updates**:
+   * Open **Stats** and verify that pagination controls (Page size = 5) operate correctly.
+   * Select different range bounds (**Today**, **7 Days**, **30 Days**, **90 Days**) and verify total focus metrics update correctly.
