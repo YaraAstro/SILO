@@ -33,12 +33,14 @@
     labels,
     datasets,
     type = "bar",
-    height = 260
+    height = 260,
+    maxXTicks
   }: {
     labels: string[];
     datasets: ChartDataset[];
     type?: ChartType;
     height?: number;
+    maxXTicks?: number;
   } = $props();
 
   let canvas = $state<HTMLCanvasElement | null>(null);
@@ -72,7 +74,11 @@
         scales: {
           x: {
             grid: { display: false },
-            ticks: { color: "#64748b" }
+            ticks: { 
+              color: "#64748b",
+              maxTicksLimit: maxXTicks,
+              maxRotation: maxXTicks ? 0 : undefined
+            }
           },
           y: {
             beginAtZero: true,
