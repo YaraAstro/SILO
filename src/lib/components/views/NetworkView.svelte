@@ -227,15 +227,20 @@
         </p>
       </div>
       <div class="flex rounded-lg bg-slate-800 p-1">
-        {#each ["7d", "30d", "90d"] as range}
+        {#each [
+          { key: "today", label: "Day" },
+          { key: "7d", label: "Week" },
+          { key: "30d", label: "Month" },
+          { key: "90d", label: "Quarter" }
+        ] as range}
           <button
-            class="rounded-md px-3 py-2 text-xs font-bold transition {dataRange === range
+            class="rounded-md px-3 py-2 text-xs font-bold transition {dataRange === range.key
               ? 'bg-slate-950 text-slate-100'
               : 'text-slate-400 hover:text-slate-100'}"
             type="button"
-            onclick={() => loadDataUsage(range as any)}
+            onclick={() => loadDataUsage(range.key as any)}
           >
-            {range}
+            {range.label}
           </button>
         {/each}
       </div>
@@ -261,16 +266,31 @@
       </div>
       <div>
         <p class="text-sm text-slate-500">Range</p>
-        <p class="mt-1 text-2xl font-black">{dataRange}</p>
+        <p class="mt-1 text-2xl font-black">
+          {dataRange === "today" ? "Day" : dataRange === "7d" ? "Week" : dataRange === "30d" ? "Month" : "Quarter"}
+        </p>
       </div>
     </div>
     {#if totalDataBytes() > 0}
-      <div class="mt-6">
-        <TrendChart
-          labels={["Selected range"]}
-          datasets={networkChartData()}
-          height={220}
-        />
+      {@const down = dataUsage?.totalDownloadBytes ?? 0}
+      {@const up = dataUsage?.totalUploadBytes ?? 0}
+      {@const total = down + up}
+      {@const downPct = total > 0 ? (down / total) * 100 : 0}
+      {@const upPct = total > 0 ? (up / total) * 100 : 0}
+      
+      <div class="mt-8 mb-2">
+        <div class="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-1">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-sm bg-teal-400 shadow-[0_0_6px_rgba(45,212,191,0.4)]"></span> Download ({downPct.toFixed(1)}%)
+          </div>
+          <div class="flex items-center gap-2">
+            Upload ({upPct.toFixed(1)}%) <span class="w-2.5 h-2.5 rounded-sm bg-violet-500 shadow-[0_0_6px_rgba(139,92,246,0.4)]"></span>
+          </div>
+        </div>
+        <div class="w-full h-3.5 rounded-full bg-slate-900 overflow-hidden flex shadow-inner">
+          <div class="h-full bg-teal-400 transition-all duration-500" style="width: {downPct}%"></div>
+          <div class="h-full bg-violet-500 transition-all duration-500" style="width: {upPct}%"></div>
+        </div>
       </div>
     {/if}
   </section>

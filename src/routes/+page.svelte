@@ -45,7 +45,7 @@
     | "settings"
     | "network-apps"
     | "network-sites";
-  type RangeKey = "7d" | "30d" | "90d";
+  type RangeKey = "today" | "7d" | "30d" | "90d";
 
   const navItems = [
     { key: "dashboard", label: "Dashboard", icon: "House" }, // Note: BottomNav expects string keys if matching, but bottom nav handles it.
