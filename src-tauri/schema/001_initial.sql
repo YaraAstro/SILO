@@ -76,3 +76,13 @@ CREATE INDEX IF NOT EXISTS idx_app_data_usage_app_date ON app_data_usage(app_nam
 CREATE INDEX IF NOT EXISTS idx_site_data_usage_domain_date ON site_data_usage(domain, date);
 CREATE INDEX IF NOT EXISTS idx_network_samples_ts ON network_samples(sample_ts);
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
+
+CREATE TABLE IF NOT EXISTS rule_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  times_blocked INTEGER DEFAULT 0,
+  times_bypassed INTEGER DEFAULT 0,
+  UNIQUE(rule_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_rule_stats_rule_date ON rule_stats(rule_id, date);

@@ -1,6 +1,6 @@
 use crate::models::{
     CompletedSession, DataConsumer, DataUsageReport, Rule, RulesSummary, Settings, UsageBucket,
-    UsageDay, UsageDayBytes, UsageReport, UsageTimeline,
+    UsageDay, UsageDayBytes, UsageReport, UsageTimeline, RuleStats,
 };
 use anyhow::Context;
 use chrono::{Duration, Utc};
@@ -630,6 +630,55 @@ impl Storage {
                 date: row.get(0)?,
                 upload_bytes: row.get(1)?,
                 download_bytes: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+    pub fn increment_rule_blocked(&self, rule_id: i64) -> anyhow::Result<()> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        conn.execute(
+            "INSERT INTO rule_stats (rule_id, date, times_blocked, times_bypassed) VALUES (?1, ?2, 1, 0)
+             ON CONFLICT(rule_id, date) DO UPDATE SET times_blocked = times_blocked + 1",
+            params![rule_id, today],
+        )?;
+        Ok(())
+    }
+
+    pub fn increment_rule_bypassed(&self, rule_id: i64) -> anyhow::Result<()> {
+        let conn = self.connection.lock();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        conn.execute(
+            "INSERT INTO rule_stats (rule_id, date, times_blocked, times_bypassed) VALUES (?1, ?2, 0, 1)
+             ON CONFLICT(rule_id, date) DO UPDATE SET times_bypassed = times_bypassed + 1",
+            params![rule_id, today],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_rule_stats_range(&self, range: &str) -> anyhow::Result<Vec<RuleStats>> {
+        let days = match range {
+            "today" => 1,
+            "7d" => 7,
+            "30d" => 30,
+            "90d" => 90,
+            _ => 30,
+        };
+        let start = (Utc::now().date_naive() - Duration::days(days - 1)).to_string();
+        let conn = self.connection.lock();
+        let mut statement = conn.prepare(
+            "SELECT rule_id, SUM(times_blocked), SUM(times_bypassed)
+             FROM rule_stats
+             WHERE date >= ?1
+             GROUP BY rule_id
+             ORDER BY rule_id ASC",
+        )?;
+        let rows = statement.query_map(params![start], |row| {
+            Ok(RuleStats {
+                rule_id: row.get(0)?,
+                date: range.to_string(),
+                times_blocked: row.get(1)?,
+                times_bypassed: row.get(2)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

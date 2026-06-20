@@ -242,6 +242,17 @@ pub fn get_usage_range(
         .map_err(to_command_error)
 }
 
+#[tauri::command]
+pub fn get_rule_stats(
+    state: State<'_, AppState>,
+    range: String,
+) -> CommandResult<Vec<crate::models::RuleStats>> {
+    state
+        .storage()
+        .get_rule_stats_range(&range)
+        .map_err(to_command_error)
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FocusModePayload {

@@ -181,3 +181,12 @@ pub struct UsageDayBytes {
     pub upload_bytes: i64,
     pub download_bytes: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleStats {
+    pub rule_id: i64,
+    pub date: String,
+    pub times_blocked: i64,
+    pub times_bypassed: i64,
+}

@@ -22,7 +22,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cleanDomain } from "$lib/utils/cleanDomain";
   import { siloApi, emptyRule } from "$lib/siloApi";
-  import type { Rule, UsageReport, DataUsageReport, UsageDayBytes, UsageTimeline } from "$lib/siloApi";
+  import type { Rule, UsageReport, DataUsageReport, UsageDayBytes, UsageTimeline, RuleStats } from "$lib/siloApi";
 
   let {
     rules,
@@ -39,7 +39,7 @@
   type RangeKey = "7d" | "30d" | "90d";
 
   // Stats specific state variables
-  let statsSubTab = $state<"screentime" | "network" | "habits">("screentime");
+  let statsSubTab = $state<"screentime" | "network" | "habits">("habits");
   let statsRange = $state<"today" | RangeKey>("7d");
   let statsScreenTab = $state<"apps" | "sites">("apps");
   let statsNetworkTab = $state<"apps" | "sites">("apps");
@@ -53,6 +53,7 @@
   let statsDataUsage = $state<DataUsageReport | null>(null);
   let statsNetworkHistory = $state<UsageDayBytes[]>([]);
   let heatmapNetworkHistory = $state<UsageDayBytes[]>([]);
+  let statsRuleStats = $state<RuleStats[]>([]);
   let timeline = $state<UsageTimeline | null>(null);
 
   const pageSize = 5;
@@ -70,14 +71,16 @@
 
   async function loadStatsData(range: "today" | RangeKey) {
     try {
-      const [uReport, dReport, netHist] = await Promise.all([
+      const [uReport, dReport, netHist, rStats] = await Promise.all([
         siloApi.getUsageRange(range),
         siloApi.getDataUsage(range),
-        siloApi.getNetworkHistory(range === "90d" ? "90d" : range === "7d" ? "7d" : "30d")
+        siloApi.getNetworkHistory(range === "90d" ? "90d" : range === "7d" ? "7d" : "30d"),
+        siloApi.getRuleStats(range)
       ]);
       statsUsage = uReport;
       statsDataUsage = dReport;
       statsNetworkHistory = netHist;
+      statsRuleStats = rStats;
     } catch (error) {
       console.error("Failed to load statistics range data:", error);
     }
@@ -128,6 +131,39 @@
   let totalNetworkPages = $derived(
     Math.max(1, Math.ceil(filteredStatsNetworkList.length / pageSize))
   );
+
+  let ruleTrackedConsumers = $derived(() => {
+    let consumers = [];
+    for (let rule of rules) {
+      if (!rule.active) continue;
+      let name = rule.target;
+      let usageItem = (rule.ruleType === "app" ? statsUsage?.apps : statsUsage?.sites)?.find(u => 
+        (rule.ruleType === "site" ? cleanDomain(u.name) === cleanDomain(name) : u.name.toLowerCase() === name.toLowerCase())
+      );
+      let totalUsageSeconds = usageItem ? usageItem.seconds : 0;
+      
+      let ruleStat = statsRuleStats?.find(rs => rs.ruleId === rule.id);
+      let timesBlocked = ruleStat ? ruleStat.timesBlocked : 0;
+      let timesBypassed = ruleStat ? ruleStat.timesBypassed : 0;
+      
+      let focusSeconds = Math.min(totalUsageSeconds, rule.limitSeconds);
+      let distractionSeconds = Math.max(0, totalUsageSeconds - rule.limitSeconds);
+      
+      consumers.push({
+        rule,
+        name,
+        totalUsageSeconds,
+        focusSeconds,
+        distractionSeconds,
+        timesBlocked,
+        timesBypassed,
+        isDistracting: rule.enforcement === "hard",
+        isNeutral: rule.enforcement === "warn",
+        isProductive: rule.enforcement === "soft"
+      });
+    }
+    return consumers.sort((a,b) => b.totalUsageSeconds - a.totalUsageSeconds);
+  });
 
   // Formatting utility helpers
   function getRuleRemainingSeconds(rule: Rule) {
@@ -255,6 +291,14 @@
   <div class="flex border-b border-slate-800/80">
     <button
       class="px-5 py-3 text-sm font-bold border-b-2 transition-all duration-200 flex items-center gap-2
+        {statsSubTab === 'habits' ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-400 hover:text-slate-200'}"
+      type="button"
+      onclick={() => statsSubTab = "habits"}
+    >
+      <Flame size={16} /> Activity &amp; Habits
+    </button>
+    <button
+      class="px-5 py-3 text-sm font-bold border-b-2 transition-all duration-200 flex items-center gap-2
         {statsSubTab === 'screentime' ? 'border-teal-400 text-teal-300' : 'border-transparent text-slate-400 hover:text-slate-200'}"
       type="button"
       onclick={() => statsSubTab = "screentime"}
@@ -268,14 +312,6 @@
       onclick={() => statsSubTab = "network"}
     >
       <Wifi size={16} /> Network Usage
-    </button>
-    <button
-      class="px-5 py-3 text-sm font-bold border-b-2 transition-all duration-200 flex items-center gap-2
-        {statsSubTab === 'habits' ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-400 hover:text-slate-200'}"
-      type="button"
-      onclick={() => statsSubTab = "habits"}
-    >
-      <Flame size={16} /> Activity &amp; Habits
     </button>
   </div>
 
@@ -831,6 +867,118 @@
             message="Trend chart will populate once sessions are logged."
           />
         {/if}
+      </section>
+    </div>
+  {:else if statsSubTab === "habits"}
+    {@const consumers = ruleTrackedConsumers()}
+    {@const totalFocus = consumers.reduce((sum, c) => sum + c.focusSeconds, 0)}
+    {@const totalDistraction = consumers.reduce((sum, c) => sum + c.distractionSeconds, 0)}
+    {@const totalBlocks = consumers.reduce((sum, c) => sum + c.timesBlocked, 0)}
+    {@const totalBypasses = consumers.reduce((sum, c) => sum + c.timesBypassed, 0)}
+    <div class="space-y-6" transition:fade={{ duration: 100 }}>
+      <!-- Habits Metrics -->
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          icon={Target}
+          title="Total Focus Time"
+          value={formatDuration(totalFocus)}
+          trend="Time within limits"
+          tone="teal"
+        />
+        <MetricCard
+          icon={Flame}
+          title="Distraction Time"
+          value={formatDuration(totalDistraction)}
+          trend="Time over limits"
+          tone="amber"
+        />
+        <MetricCard
+          icon={Award}
+          title="Total Blocks"
+          value={String(totalBlocks)}
+          caption="Times limits enforced"
+          tone="violet"
+        />
+        <MetricCard
+          icon={Clock}
+          title="Limit Bypasses"
+          value={String(totalBypasses)}
+          caption="Times time was extended"
+          tone="slate"
+        />
+      </div>
+
+      <section class="silo-card p-6">
+        <div class="flex items-center justify-between border-b border-slate-800/60 pb-4 mb-5">
+          <div>
+            <h2 class="text-lg font-bold">Per-app Focus &amp; Distraction</h2>
+            <p class="text-sm text-slate-500">Activity breakdown for tracked rules</p>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          {#each consumers as consumer}
+            {@const focusPct = consumer.totalUsageSeconds > 0 ? (consumer.focusSeconds / consumer.totalUsageSeconds) * 100 : 0}
+            {@const distractionPct = consumer.totalUsageSeconds > 0 ? (consumer.distractionSeconds / consumer.totalUsageSeconds) * 100 : 0}
+            <div class="p-4 rounded-xl border border-slate-800 bg-slate-900/50 flex flex-col gap-3 transition-colors hover:bg-slate-800/50 hover:border-slate-700">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-lg {consumer.isDistracting ? 'bg-amber-500/10 text-amber-400' : consumer.isNeutral ? 'bg-violet-500/10 text-violet-400' : 'bg-teal-500/10 text-teal-400'}">
+                    {#if consumer.rule.ruleType === "site"}
+                      <Globe size={20} />
+                    {:else}
+                      <Monitor size={20} />
+                    {/if}
+                  </div>
+                  <div>
+                    <h3 class="font-bold text-slate-200">{consumer.name}</h3>
+                    <p class="text-xs font-semibold mt-0.5 {consumer.isDistracting ? 'text-amber-400' : consumer.isNeutral ? 'text-violet-400' : 'text-teal-400'}">
+                      {consumer.isProductive ? 'Productive' : consumer.isNeutral ? 'Neutral' : 'Distracting'} Rule
+                    </p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="text-sm font-bold text-slate-300">
+                    Limit {Math.round(consumer.rule.limitSeconds / 60)}m
+                  </p>
+                  <p class="text-[11px] text-slate-500 mt-1 flex gap-1.5 justify-end font-semibold">
+                    {#if consumer.timesBlocked > 0}
+                      <span class="text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded shadow-sm border border-rose-500/20">Blocked {consumer.timesBlocked}x</span>
+                    {/if}
+                    {#if consumer.timesBypassed > 0}
+                      <span class="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded shadow-sm border border-amber-500/20">Bypassed {consumer.timesBypassed}x</span>
+                    {/if}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Dual-color Ratio Bar -->
+              <div class="flex flex-col gap-1.5 mt-1">
+                <div class="flex items-center justify-between text-[11px] font-bold px-1">
+                  <span class="text-teal-400">Focus: {formatDuration(consumer.focusSeconds)}</span>
+                  {#if consumer.distractionSeconds > 0}
+                    <span class="text-amber-400">Distraction: {formatDuration(consumer.distractionSeconds)}</span>
+                  {/if}
+                </div>
+                <div class="flex h-2 w-full overflow-hidden rounded-full bg-slate-800 shadow-inner">
+                  {#if consumer.totalUsageSeconds > 0}
+                    <div class="bg-teal-400 transition-all duration-500 border-r border-slate-900" style="width: {focusPct}%"></div>
+                    <div class="bg-amber-400 transition-all duration-500" style="width: {distractionPct}%"></div>
+                  {:else}
+                    <div class="h-full w-full bg-slate-800/50"></div>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {/each}
+          {#if consumers.length === 0}
+             <EmptyState
+                icon={Target}
+                title="No tracked habits"
+                message="Add rules for apps and sites to start tracking your focus and distraction habits."
+              />
+          {/if}
+        </div>
       </section>
     </div>
   {/if}

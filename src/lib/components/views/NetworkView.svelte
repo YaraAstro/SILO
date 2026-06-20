@@ -33,8 +33,8 @@
     dataUsage: DataUsageReport | null;
     exportUsage: () => Promise<void>;
     exporting: boolean;
-    dataRange: "7d" | "30d" | "90d";
-    loadDataUsage: (range: "7d" | "30d" | "90d") => Promise<void>;
+    dataRange: "today" | "7d" | "30d" | "90d";
+    loadDataUsage: (range: "today" | "7d" | "30d" | "90d") => Promise<void>;
     liveNetworkSamples: Array<{ time: string; down: number; up: number }>;
     networkHistoryRange: "7d" | "30d";
     changeNetworkHistoryRange: (range: "7d" | "30d") => Promise<void>;
@@ -78,7 +78,7 @@
     const totalSamples = liveNetworkSamples.length;
     const interval = settings?.sampleIntervalSeconds ?? 5;
 
-    return liveNetworkSamples.map((_, i) => {
+    return liveNetworkSamples.map((sample: any, i: number) => {
       const secondsAgo = (totalSamples - 1 - i) * interval;
       if (secondsAgo === 0) return "Now";
       if (secondsAgo < 60) return `-${secondsAgo}s`;
@@ -355,13 +355,13 @@
   title: string,
   rows: DataConsumer[],
   label: string,
-  icon: any,
+  Icon: any,
 )}
   <section class="silo-card p-7 flex flex-col justify-between">
     <div>
       <div class="flex items-center justify-between gap-3 mb-8">
         <div class="flex items-center gap-2.5">
-          <svelte:component this={icon} size={18} class="text-teal-400" />
+          <Icon size={18} class="text-teal-400" />
           <h2 class="text-[15px] font-bold text-slate-100">{title}</h2>
         </div>
         <span class="text-[11px] text-slate-500 font-semibold">{dataRange}</span>
@@ -381,7 +381,7 @@
                 <div class="flex items-center gap-3.5 min-w-0">
                   <!-- Icon placeholder / Fallback -->
                   <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-800/40 text-slate-300 shrink-0 border border-slate-700/30">
-                     <svelte:component this={icon} size={15} />
+                     <Icon size={15} />
                   </div>
                   <div class="min-w-0 mt-0.5">
                     <p class="truncate text-[14px] font-bold text-slate-100 leading-tight">{row.name}</p>

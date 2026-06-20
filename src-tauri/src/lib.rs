@@ -6,7 +6,7 @@ mod storage;
 use api::{
     add_rule_time, delete_rule, export_logs, export_usage_data, get_app_state, get_available_apps,
     get_data_usage, get_network_history, get_network_speed, get_rules, get_settings, get_usage,
-    get_usage_90d, get_usage_range, handshake, mark_backup_complete, save_rule, save_settings,
+    get_usage_90d, get_usage_range, get_rule_stats, handshake, mark_backup_complete, save_rule, save_settings,
     start_focus_mode, stop_focus_mode, toggle_focus_mode,
 };
 use models::AppReadyEvent;
@@ -26,6 +26,7 @@ struct RuleState {
     last_countdown_sec: Option<i64>,
     warned_soft_hit: bool,
     last_soft_notification_ts: Option<i64>,
+    last_blocked_ts: Option<i64>,
 }
 
 pub struct AppState {
@@ -222,6 +223,8 @@ pub fn extend_rule_limit(app: &tauri::AppHandle, id: i64, seconds: i64) -> Resul
         }
         let saved = storage.save_rule(rule).map_err(|e| e.to_string())?;
         let _ = app.emit("rules_changed", &saved);
+        
+        let _ = storage.increment_rule_bypassed(id);
 
         let mut rule_states = state.rule_states.lock();
         if let Some(state) = rule_states.get_mut(&id) {
@@ -495,6 +498,16 @@ fn check_and_enforce_rules(
                 }
 
                 if matches_active && remaining <= 0 {
+                    let now_ts = chrono::Utc::now().timestamp();
+                    let should_track_block = match rule_state.last_blocked_ts {
+                        Some(ts) => now_ts - ts >= 5,
+                        None => true,
+                    };
+                    if should_track_block {
+                        rule_state.last_blocked_ts = Some(now_ts);
+                        let _ = state.storage().increment_rule_blocked(rule_id);
+                    }
+
                     if rule.rule_type == "site" {
                         redirect_active_tab(&blocked_url);
                     } else {
@@ -605,6 +618,16 @@ fn check_and_enforce_rules(
                 }
 
                 if matches_active && remaining <= 0 {
+                    let now_ts = chrono::Utc::now().timestamp();
+                    let should_track_block = match rule_state.last_blocked_ts {
+                        Some(ts) => now_ts - ts >= 5,
+                        None => true,
+                    };
+                    if should_track_block {
+                        rule_state.last_blocked_ts = Some(now_ts);
+                        let _ = state.storage().increment_rule_blocked(rule_id);
+                    }
+
                     if rule.rule_type == "site" {
                         redirect_active_tab(&blocked_url);
                     } else {
@@ -639,6 +662,16 @@ fn check_and_enforce_rules(
             }
             "soft" => {
                 if matches_active && remaining <= 0 {
+                    let now_ts = chrono::Utc::now().timestamp();
+                    let should_track_block = match rule_state.last_blocked_ts {
+                        Some(ts) => now_ts - ts >= 5,
+                        None => true,
+                    };
+                    if should_track_block {
+                        rule_state.last_blocked_ts = Some(now_ts);
+                        let _ = state.storage().increment_rule_blocked(rule_id);
+                    }
+
                     minimize_active_window();
 
                     let now_ts = chrono::Utc::now().timestamp();
@@ -872,7 +905,8 @@ pub fn run() {
             get_available_apps,
             get_network_history,
             add_rule_time,
-            get_usage_range
+            get_usage_range,
+            get_rule_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

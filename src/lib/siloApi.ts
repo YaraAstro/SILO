@@ -92,6 +92,13 @@ export type UsageDayBytes = {
   downloadBytes: number;
 };
 
+export type RuleStats = {
+  ruleId: number;
+  date: string;
+  timesBlocked: number;
+  timesBypassed: number;
+};
+
 export const emptyRule = (): Rule => ({
   id: null,
   ruleType: "app",
@@ -128,4 +135,5 @@ export const siloApi = {
   getAvailableApps: () => invoke<string[]>("get_available_apps"),
   getNetworkHistory: (range: string) => invoke<UsageDayBytes[]>("get_network_history", { range }),
   addRuleTime: (id: number, seconds: number) => invoke<void>("add_rule_time", { id, seconds }),
+  getRuleStats: (range: string) => invoke<RuleStats[]>("get_rule_stats", { range }),
 };
