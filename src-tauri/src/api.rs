@@ -121,7 +121,7 @@ pub fn get_data_usage(state: State<'_, AppState>, range: String) -> CommandResul
 }
 
 #[tauri::command]
-pub fn export_logs(state: State<'_, AppState>, range: String) -> CommandResult<ExportResult> {
+pub fn export_logs(state: State<'_, AppState>, range: String, dir_path: Option<String>) -> CommandResult<ExportResult> {
     let payload = ExportPayload {
         exported_at: Utc::now().to_rfc3339(),
         export_type: "logs",
@@ -130,7 +130,7 @@ pub fn export_logs(state: State<'_, AppState>, range: String) -> CommandResult<E
     };
     let file_path = state
         .storage()
-        .export_json("logs", &payload)
+        .export_json("logs", &payload, dir_path)
         .map_err(to_command_error)?;
     Ok(ExportResult {
         file_path: file_path.display().to_string(),
@@ -138,14 +138,14 @@ pub fn export_logs(state: State<'_, AppState>, range: String) -> CommandResult<E
 }
 
 #[tauri::command]
-pub fn export_usage_data(state: State<'_, AppState>, range: String) -> CommandResult<ExportResult> {
+pub fn export_usage_data(state: State<'_, AppState>, range: String, dir_path: Option<String>) -> CommandResult<ExportResult> {
     let payload = state
         .storage()
         .data_usage(&range)
         .map_err(to_command_error)?;
     let file_path = state
         .storage()
-        .export_json("usage", &payload)
+        .export_json("usage", &payload, dir_path)
         .map_err(to_command_error)?;
     Ok(ExportResult {
         file_path: file_path.display().to_string(),

@@ -58,13 +58,13 @@ impl Monitor {
             }
             None => ActiveApp {
                 app: "Unknown".to_string(),
-            title: "No foreground window detected".to_string(),
-            elapsed_seconds: 0,
-            pid: None,
-            sampled_at: Utc::now().timestamp(),
-            site: None,
-            is_fullscreen: false,
-        },
+                title: "No foreground window detected".to_string(),
+                elapsed_seconds: 0,
+                pid: None,
+                sampled_at: Utc::now().timestamp(),
+                site: None,
+                is_fullscreen: false,
+            },
         };
 
         let changed = inner.current.pid != next.pid || inner.current.title != next.title;
@@ -198,19 +198,27 @@ mod platform {
                     windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTOPRIMARY,
                 );
                 let mut mi = windows::Win32::Graphics::Gdi::MONITORINFO {
-                    cbSize: std::mem::size_of::<windows::Win32::Graphics::Gdi::MONITORINFO>() as u32,
+                    cbSize: std::mem::size_of::<windows::Win32::Graphics::Gdi::MONITORINFO>()
+                        as u32,
                     ..Default::default()
                 };
                 if windows::Win32::Graphics::Gdi::GetMonitorInfoW(monitor, &mut mi).as_bool() {
                     let mut client_rect = windows::Win32::Foundation::RECT::default();
-                    if windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client_rect).is_ok() {
+                    if windows::Win32::UI::WindowsAndMessaging::GetClientRect(
+                        hwnd,
+                        &mut client_rect,
+                    )
+                    .is_ok()
+                    {
                         let mut client_point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
-                        if windows::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut client_point).as_bool() {
+                        if windows::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut client_point)
+                            .as_bool()
+                        {
                             let client_left = client_point.x;
                             let client_top = client_point.y;
                             let client_right = client_left + client_rect.right;
                             let client_bottom = client_top + client_rect.bottom;
-                            
+
                             if client_left <= mi.rcMonitor.left
                                 && client_top <= mi.rcMonitor.top
                                 && client_right >= mi.rcMonitor.right
@@ -223,7 +231,11 @@ mod platform {
                 }
             }
 
-            Some(ActiveWindowSample { pid, title, is_fullscreen })
+            Some(ActiveWindowSample {
+                pid,
+                title,
+                is_fullscreen,
+            })
         }
     }
 }

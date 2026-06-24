@@ -54,12 +54,21 @@
     }
   }
 
+  import { open } from "@tauri-apps/plugin-dialog";
+
   async function exportUsage() {
     exporting = true;
     try {
-      const result = await siloApi.exportUsageData("30d"); // Default or range could be passed
-      exportPath = result.filePath;
-      showToast("Usage data exported successfully!", "success");
+      const selectedDirPath = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Export Directory"
+      });
+      if (selectedDirPath) {
+        const result = await siloApi.exportUsageData("30d", selectedDirPath as string);
+        exportPath = result.filePath;
+        showToast("Usage data exported successfully!", "success");
+      }
     } catch (error) {
       showToast(toErrorMessage(error), "error");
     } finally {
@@ -70,9 +79,16 @@
   async function exportLogs() {
     exporting = true;
     try {
-      const result = await siloApi.exportLogs("30d");
-      exportPath = result.filePath;
-      showToast("Logs exported successfully!", "success");
+      const selectedDirPath = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Export Directory"
+      });
+      if (selectedDirPath) {
+        const result = await siloApi.exportLogs("30d", selectedDirPath as string);
+        exportPath = result.filePath;
+        showToast("Logs exported successfully!", "success");
+      }
     } catch (error) {
       showToast(toErrorMessage(error), "error");
     } finally {

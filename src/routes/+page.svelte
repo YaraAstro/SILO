@@ -2,6 +2,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
+import { open } from "@tauri-apps/plugin-dialog";
   import { fade, fly } from "svelte/transition";
   import {
     Database,
@@ -587,9 +588,16 @@
           exportUsage={async () => {
             exporting = true;
             try {
-              const result = await siloApi.exportUsageData(dataRange);
-              exportPath = result.filePath;
-              showToast("Usage data exported successfully!", "success");
+              const selectedDirPath = await open({
+                directory: true,
+                multiple: false,
+                title: "Select Export Directory"
+              });
+              if (selectedDirPath) {
+                const result = await siloApi.exportUsageData(dataRange, selectedDirPath as string);
+                exportPath = result.filePath;
+                showToast("Usage data exported successfully!", "success");
+              }
             } catch (error) {
               showToast(toErrorMessage(error), "error");
             } finally {

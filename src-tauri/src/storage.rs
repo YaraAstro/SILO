@@ -1,6 +1,6 @@
 use crate::models::{
-    CompletedSession, DataConsumer, DataUsageReport, Rule, RulesSummary, Settings, UsageBucket,
-    UsageDay, UsageDayBytes, UsageReport, UsageTimeline, RuleStats,
+    CompletedSession, DataConsumer, DataUsageReport, Rule, RuleStats, RulesSummary, Settings,
+    UsageBucket, UsageDay, UsageDayBytes, UsageReport, UsageTimeline,
 };
 use anyhow::Context;
 use chrono::{Duration, Utc};
@@ -408,16 +408,23 @@ impl Storage {
         })
     }
 
-    pub fn export_json<T: Serialize>(&self, prefix: &str, payload: &T) -> anyhow::Result<PathBuf> {
-        let export_dir = self.data_dir.join("exports");
-        fs::create_dir_all(&export_dir)?;
+    pub fn export_json<T: Serialize>(&self, prefix: &str, payload: &T, dir_path: Option<String>) -> anyhow::Result<PathBuf> {
+        let export_dir = match dir_path {
+            Some(path) => PathBuf::from(path),
+            None => {
+                let default_dir = self.data_dir.join("exports");
+                fs::create_dir_all(&default_dir)?;
+                default_dir
+            }
+        };
         let file_path = export_dir.join(format!(
             "{prefix}-{}-{}.json",
             Utc::now().format("%Y%m%d%H%M%S"),
             Uuid::new_v4()
         ));
-        let json = serde_json::to_string_pretty(payload)?;
-        fs::write(&file_path, json)?;
+        let file = fs::File::create(&file_path)?;
+        let writer = std::io::BufWriter::new(file);
+        serde_json::to_writer(writer, payload)?;
         Ok(file_path)
     }
 

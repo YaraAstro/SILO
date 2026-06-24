@@ -5,9 +5,9 @@ mod storage;
 
 use api::{
     add_rule_time, delete_rule, export_logs, export_usage_data, get_app_state, get_available_apps,
-    get_data_usage, get_network_history, get_network_speed, get_rules, get_settings, get_usage,
-    get_usage_90d, get_usage_range, get_rule_stats, handshake, mark_backup_complete, save_rule, save_settings,
-    start_focus_mode, stop_focus_mode, toggle_focus_mode,
+    get_data_usage, get_network_history, get_network_speed, get_rule_stats, get_rules,
+    get_settings, get_usage, get_usage_90d, get_usage_range, handshake, mark_backup_complete,
+    save_rule, save_settings, start_focus_mode, stop_focus_mode, toggle_focus_mode,
 };
 use models::AppReadyEvent;
 use monitor::{Monitor, NetworkMonitor};
@@ -223,7 +223,7 @@ pub fn extend_rule_limit(app: &tauri::AppHandle, id: i64, seconds: i64) -> Resul
         }
         let saved = storage.save_rule(rule).map_err(|e| e.to_string())?;
         let _ = app.emit("rules_changed", &saved);
-        
+
         let _ = storage.increment_rule_bypassed(id);
 
         let mut rule_states = state.rule_states.lock();
@@ -368,9 +368,10 @@ fn trigger_native_toast(
     // Show overlay in all warning/block cases when limit is < 60s or 0
     // ONLY show the overlay if the active app is in fullscreen mode
     let is_fullscreen = app_handle.state::<AppState>().active_app().is_fullscreen;
-    
+
     if is_fullscreen && remaining_seconds <= 60 {
-        let is_hard_block = (enforcement == "hard" || enforcement == "warn") && remaining_seconds <= 0;
+        let is_hard_block =
+            (enforcement == "hard" || enforcement == "warn") && remaining_seconds <= 0;
         show_overlay(app_handle, &title, &body, is_hard_block);
     }
 
@@ -390,12 +391,7 @@ fn trigger_native_toast(
     }
 }
 
-fn show_overlay(
-    app_handle: &tauri::AppHandle,
-    title: &str,
-    body: &str,
-    is_hard_block: bool,
-) {
+fn show_overlay(app_handle: &tauri::AppHandle, title: &str, body: &str, is_hard_block: bool) {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
 
     if let Some(window) = app_handle.get_webview_window("overlay") {
@@ -439,7 +435,7 @@ fn show_overlay(
             let screen_size = monitor.size();
             let logical_size = tauri::LogicalSize::new(420.0, 120.0);
             let physical_size = logical_size.to_physical::<u32>(scale_factor);
-            
+
             let x = screen_size.width.saturating_sub(physical_size.width + 20);
             let y = screen_size.height.saturating_sub(physical_size.height + 60);
             let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
@@ -803,6 +799,7 @@ pub fn run() {
     tracing_subscriber::fmt().with_target(false).init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(arg) = argv.get(1) {
                 if arg.starts_with("silo://add-time/") {
