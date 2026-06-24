@@ -799,6 +799,7 @@ pub fn run() {
     tracing_subscriber::fmt().with_target(false).init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(arg) = argv.get(1) {

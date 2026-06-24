@@ -9,10 +9,13 @@
     RotateCcw,
     Keyboard,
     Info,
+    RefreshCw,
   } from "lucide-svelte";
   import IconBadge from "$lib/components/IconBadge.svelte";
   import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { check } from "@tauri-apps/plugin-updater";
+  import { ask, message } from "@tauri-apps/plugin-dialog";
   import { siloApi } from "$lib/siloApi";
   import type { Settings, BootStatus } from "$lib/siloApi";
 
@@ -29,6 +32,7 @@
   let savingSettings = $state(false);
   let exporting = $state(false);
   let exportPath = $state("");
+  let checkingUpdate = $state(false);
 
   // Handler functions
   async function saveSettings() {
@@ -101,6 +105,36 @@
       await openUrl(url);
     } catch (error) {
       showToast(toErrorMessage(error), "error");
+    }
+  }
+
+  async function checkForUpdates() {
+    checkingUpdate = true;
+    try {
+      const update = await check();
+      if (update) {
+        const yes = await ask(
+          `Update to ${update.version} is available!\n\nRelease notes:\n${update.body || 'No release notes provided.'}\n\nDo you want to install it now?`,
+          {
+            title: "Update Available",
+            kind: "info",
+          }
+        );
+        if (yes) {
+          showToast("Downloading update...", "info");
+          await update.downloadAndInstall();
+          showToast("Update installed successfully. Please restart SILO.", "success");
+        }
+      } else {
+        await message("You are on the latest version.", {
+          title: "No Update Available",
+          kind: "info",
+        });
+      }
+    } catch (error) {
+      showToast(toErrorMessage(error), "error");
+    } finally {
+      checkingUpdate = false;
     }
   }
 
@@ -296,7 +330,15 @@
         <div class="space-y-3">
           <div class="flex items-center gap-2">
             <span class="text-2xl font-black bg-gradient-to-r from-teal-400 to-purple-400 bg-clip-text text-transparent">SILO</span>
-            <span class="text-xs font-mono font-bold bg-slate-800 text-teal-400 px-2 py-0.5 rounded border border-teal-500/10">v0.4.0</span>
+            <span class="text-xs font-mono font-bold bg-slate-800 text-teal-400 px-2 py-0.5 rounded border border-teal-500/10">v0.5.0-pre</span>
+            <button
+              class="ml-2 flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+              onclick={checkForUpdates}
+              disabled={checkingUpdate}
+            >
+              <RefreshCw size={12} class={checkingUpdate ? 'animate-spin' : ''} />
+              {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+            </button>
           </div>
           <p class="text-sm text-slate-300 max-w-lg leading-relaxed">
             A local-first, privacy-focused productivity and digital wellness platform. Monitor screen time, control distractions, and analyze internet usage in real-time.
