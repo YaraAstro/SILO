@@ -552,7 +552,7 @@
       <div class="mt-auto">
         {#if true}
           {@const recentSamples = liveNetworkSamples.slice(-35)}
-          {@const maxSpd = Math.max(0.01, ...recentSamples.map(r => r.down + r.up))}
+          {@const maxSpd = Math.max(0.01, ...recentSamples.map((r: {down: number, up: number}) => r.down + r.up))}
           <div class="flex flex-col justify-end h-[72px] relative pb-0.5">
             <!-- Dashed baseline -->
             <div class="absolute bottom-[1px] left-0 right-0 border-b-[3px] border-dashed border-teal-500/30 z-0"></div>
