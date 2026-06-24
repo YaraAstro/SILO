@@ -4,7 +4,7 @@ mod monitor;
 mod storage;
 
 use api::{
-    add_rule_time, delete_rule, export_logs, export_usage_data, get_app_state, get_available_apps,
+    add_rule_time, delete_rule, exit_app, export_logs, export_usage_data, get_app_state, get_available_apps,
     get_data_usage, get_network_history, get_network_speed, get_rule_stats, get_rules,
     get_settings, get_usage, get_usage_90d, get_usage_range, handshake, mark_backup_complete,
     save_rule, save_settings, start_focus_mode, stop_focus_mode, toggle_focus_mode,
@@ -794,17 +794,23 @@ fn close_overlay(app_handle: tauri::AppHandle) {
     }
 }
 
+// Toast logic removed due to Windows limitation with protocol input
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    let _ = std::fs::write("d:\\Devs\\project_silo\\attempt_VI\\silo\\silo\\startup_args.txt", format!("{:?}", args));
+    
     tracing_subscriber::fmt().with_target(false).init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let _ = std::fs::write("d:\\Devs\\project_silo\\attempt_VI\\silo\\silo\\args.txt", format!("{:?}", argv));
+            let mut skip_show = false;
             if let Some(arg) = argv.get(1) {
-                if arg.starts_with("silo://add-time/") {
-                    let parts: Vec<&str> = arg
+                let arg_clean = arg.trim_matches('"');
+                if arg_clean.starts_with("silo://add-time/") {
+                    let parts: Vec<&str> = arg_clean
                         .strip_prefix("silo://add-time/")
                         .unwrap()
                         .split('/')
@@ -816,13 +822,20 @@ pub fn run() {
                             let _ = extend_rule_limit(app, rule_id, seconds);
                         }
                     }
+                } else if arg_clean.contains("silo://unlock-focus") {
+                    skip_show = true;
+                    // Deprecated: Protocol activation cannot receive input text on Windows
                 }
             }
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
+            if !skip_show {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -907,21 +920,30 @@ pub fn run() {
                     "toggle_focus" => {
                         let app_state = app.state::<AppState>();
                         let enabled = !app_state.focus_mode_enabled();
-                        app_state.set_focus_mode(enabled);
-                        let _ = app.emit(
-                            "focus_mode_changed",
-                            serde_json::json!({ "enabled": enabled }),
-                        );
-
-                        let new_text = if enabled {
-                            "Stop Focus Mode"
+                        
+                        if !enabled {
+                            // Turn OFF requires PIN
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                let _ = app.emit("request_pin_unlock", ());
+                            }
                         } else {
-                            "Start Focus Mode"
-                        };
-                        let _ = toggle_focus_clone.set_text(new_text);
+                            // Turn ON is direct
+                            app_state.set_focus_mode(true);
+                            let _ = app.emit(
+                                "focus_mode_changed",
+                                serde_json::json!({ "enabled": true }),
+                            );
+                            let _ = toggle_focus_clone.set_text("Stop Focus Mode");
+                        }
                     }
                     "quit" => {
-                        app.exit(0);
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = app.emit("request_quit_pin_unlock", ());
+                        }
                     }
                     _ => {}
                 })
@@ -991,7 +1013,8 @@ pub fn run() {
             add_rule_time,
             get_usage_range,
             get_rule_stats,
-            close_overlay
+            close_overlay,
+            exit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

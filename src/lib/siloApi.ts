@@ -136,4 +136,5 @@ export const siloApi = {
   getNetworkHistory: (range: string) => invoke<UsageDayBytes[]>("get_network_history", { range }),
   addRuleTime: (id: number, seconds: number) => invoke<void>("add_rule_time", { id, seconds }),
   getRuleStats: (range: string) => invoke<RuleStats[]>("get_rule_stats", { range }),
+  exitApp: () => invoke<void>("exit_app"),
 };

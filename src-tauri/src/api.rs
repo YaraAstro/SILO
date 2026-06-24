@@ -253,6 +253,12 @@ pub fn get_rule_stats(
         .map_err(to_command_error)
 }
 
+#[tauri::command]
+pub fn exit_app(app: AppHandle) -> CommandResult<()> {
+    app.exit(0);
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FocusModePayload {

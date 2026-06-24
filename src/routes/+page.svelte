@@ -13,6 +13,7 @@ import { open } from "@tauri-apps/plugin-dialog";
     ChartColumn,
     Wifi,
     Settings as SettingsIcon,
+    Lock,
   } from "lucide-svelte";
   import BottomNav from "$lib/components/BottomNav.svelte";
   import {
@@ -32,6 +33,9 @@ import { open } from "@tauri-apps/plugin-dialog";
   // Import views
   import DashboardView from "$lib/components/views/DashboardView.svelte";
   import RulesView from "$lib/components/views/RulesView.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import OtpInput from "$lib/components/OtpInput.svelte";
+  import { cleanDomain } from "$lib/utils/cleanDomain";
   import StatsView from "$lib/components/views/StatsView.svelte";
   import NetworkView from "$lib/components/views/NetworkView.svelte";
   import NetworkAppsView from "$lib/components/views/NetworkAppsView.svelte";
@@ -71,6 +75,10 @@ import { open } from "@tauri-apps/plugin-dialog";
   let exportPath = $state("");
 
   let rulesAuthorized = $state(false);
+  let showPinModal = $state(false);
+  let pinInput = $state("");
+  let pinModalType = $state<"focus" | "quit">("focus");
+  let unlockingFromTray = false;
 
   // Overlays state
   let showViolationOverlay = $state(false);
@@ -213,6 +221,23 @@ import { open } from "@tauri-apps/plugin-dialog";
     void loadAll();
     const timer = window.setInterval(() => void refreshLiveState(), 5000);
 
+    void listen("request_pin_unlock", () => {
+      pinModalType = "focus";
+      unlockingFromTray = true;
+      showPinModal = true;
+      // Ensure window is shown
+      getCurrentWindow().show();
+      getCurrentWindow().setFocus();
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    void listen("request_quit_pin_unlock", () => {
+      pinModalType = "quit";
+      showPinModal = true;
+      // Ensure window is shown
+      getCurrentWindow().show();
+      getCurrentWindow().setFocus();
+    }).then((unlisten) => unlisteners.push(unlisten));
+
     getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       if (!focused) {
         rulesAuthorized = false;
@@ -242,6 +267,12 @@ import { open } from "@tauri-apps/plugin-dialog";
       if (snapshot)
         snapshot = { ...snapshot, focusMode: event.payload.enabled };
       if (boot) boot = { ...boot, focusMode: event.payload.enabled };
+    })
+      .then((unlisten) => unlisteners.push(unlisten))
+      .catch(() => undefined);
+
+    void listen("rules_authorized", () => {
+      rulesAuthorized = true;
     })
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
@@ -397,6 +428,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 
   // Toggles and Actions
   async function toggleFocus() {
+    if (snapshot?.focusMode && !rulesAuthorized) {
+      showPinModal = true;
+      return;
+    }
+    
     try {
       const enabled = await siloApi.toggleFocusMode();
       if (snapshot) snapshot = { ...snapshot, focusMode: enabled };
@@ -407,6 +443,51 @@ import { open } from "@tauri-apps/plugin-dialog";
       );
     } catch (error) {
       showToast(toErrorMessage(error), "error");
+    }
+  }
+
+  function getTodayPin() {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, "0");
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const yy = String(today.getFullYear()).slice(-2);
+    return `${dd}${mm}${yy}`;
+  }
+
+  function submitPin() {
+    if (pinInput === getTodayPin()) {
+      rulesAuthorized = true;
+      showPinModal = false;
+      pinInput = "";
+      
+      if (pinModalType === "focus") {
+        toggleFocus();
+
+        if (unlockingFromTray) {
+          unlockingFromTray = false;
+          getCurrentWindow().hide();
+        }
+      } else if (pinModalType === "quit") {
+        void siloApi.exitApp().catch((error) => {
+          showToast(toErrorMessage(error), "error");
+        });
+      }
+    } else {
+      showToast("Incorrect PIN. Access denied.", "error");
+      pinInput = "";
+    }
+  }
+  
+  function cancelPin() {
+    showPinModal = false;
+    pinInput = "";
+    if (pinModalType === "focus") {
+      if (unlockingFromTray) {
+        unlockingFromTray = false;
+        getCurrentWindow().hide();
+      }
+    } else if (pinModalType === "quit") {
+      getCurrentWindow().hide();
     }
   }
 
@@ -860,6 +941,50 @@ import { open } from "@tauri-apps/plugin-dialog";
             }}
           >
             Acknowledge
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- PIN Modal for Toggle Focus -->
+  {#if showPinModal}
+    <div
+      transition:fade={{ duration: 200 }}
+      class="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm"
+    >
+      <div class="silo-card max-w-sm w-full p-6 border border-slate-700/50 bg-slate-900/95 shadow-2xl">
+        <div class="text-center mb-6">
+          <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full {pinModalType === 'quit' ? 'bg-red-500/10 text-red-400' : 'bg-teal-500/10 text-teal-400'} mb-3">
+            <Lock size={24} />
+          </div>
+          <h2 class="text-xl font-bold text-slate-100">
+            {pinModalType === 'quit' ? 'Quit Application' : 'Turn Off Focus Mode'}
+          </h2>
+          <p class="text-xs text-slate-400 mt-2">
+            {pinModalType === 'quit' ? "Enter today's PIN to exit the application." : "Enter today's PIN to disable focus mode."}
+          </p>
+        </div>
+        <div class="mb-6">
+          <OtpInput
+            bind:value={pinInput}
+            length={6}
+            onsubmit={submitPin}
+            oncancel={cancelPin}
+          />
+        </div>
+        <div class="flex gap-3">
+          <button
+            class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-lg transition"
+            onclick={cancelPin}
+          >
+            Cancel
+          </button>
+          <button
+            class="flex-1 {pinModalType === 'quit' ? 'bg-red-600 hover:bg-red-700' : 'bg-teal-600 hover:bg-teal-700'} text-white font-bold py-2.5 rounded-lg transition"
+            onclick={submitPin}
+          >
+            {pinModalType === 'quit' ? 'Quit' : 'Unlock'}
           </button>
         </div>
       </div>
