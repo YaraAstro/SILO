@@ -890,21 +890,21 @@
           title="Distraction Time"
           value={formatDuration(totalDistraction)}
           trend="Time over limits"
-          tone="amber"
+          tone="yellow"
         />
         <MetricCard
           icon={Award}
           title="Total Blocks"
           value={String(totalBlocks)}
           caption="Times limits enforced"
-          tone="violet"
+          tone="purple"
         />
         <MetricCard
           icon={Clock}
           title="Limit Bypasses"
           value={String(totalBypasses)}
           caption="Times time was extended"
-          tone="slate"
+          tone="neutral"
         />
       </div>
 
