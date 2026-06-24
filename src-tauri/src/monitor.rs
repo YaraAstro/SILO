@@ -53,16 +53,18 @@ impl Monitor {
                     pid: Some(sample.pid),
                     sampled_at: Utc::now().timestamp(),
                     site,
+                    is_fullscreen: sample.is_fullscreen,
                 }
             }
             None => ActiveApp {
                 app: "Unknown".to_string(),
-                title: "No foreground window detected".to_string(),
-                elapsed_seconds: 0,
-                pid: None,
-                sampled_at: Utc::now().timestamp(),
-                site: None,
-            },
+            title: "No foreground window detected".to_string(),
+            elapsed_seconds: 0,
+            pid: None,
+            sampled_at: Utc::now().timestamp(),
+            site: None,
+            is_fullscreen: false,
+        },
         };
 
         let changed = inner.current.pid != next.pid || inner.current.title != next.title;
@@ -156,6 +158,7 @@ fn bytes_per_second(bytes: u64, elapsed_seconds: f64) -> i64 {
 struct ActiveWindowSample {
     pid: u32,
     title: String,
+    is_fullscreen: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -187,7 +190,40 @@ mod platform {
                 "Untitled window".to_string()
             };
 
-            Some(ActiveWindowSample { pid, title })
+            let mut is_fullscreen = false;
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect).is_ok() {
+                let monitor = windows::Win32::Graphics::Gdi::MonitorFromWindow(
+                    hwnd,
+                    windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTOPRIMARY,
+                );
+                let mut mi = windows::Win32::Graphics::Gdi::MONITORINFO {
+                    cbSize: std::mem::size_of::<windows::Win32::Graphics::Gdi::MONITORINFO>() as u32,
+                    ..Default::default()
+                };
+                if windows::Win32::Graphics::Gdi::GetMonitorInfoW(monitor, &mut mi).as_bool() {
+                    let mut client_rect = windows::Win32::Foundation::RECT::default();
+                    if windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client_rect).is_ok() {
+                        let mut client_point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+                        if windows::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut client_point).as_bool() {
+                            let client_left = client_point.x;
+                            let client_top = client_point.y;
+                            let client_right = client_left + client_rect.right;
+                            let client_bottom = client_top + client_rect.bottom;
+                            
+                            if client_left <= mi.rcMonitor.left
+                                && client_top <= mi.rcMonitor.top
+                                && client_right >= mi.rcMonitor.right
+                                && client_bottom >= mi.rcMonitor.bottom
+                            {
+                                is_fullscreen = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Some(ActiveWindowSample { pid, title, is_fullscreen })
         }
     }
 }

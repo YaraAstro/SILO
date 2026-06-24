@@ -36,6 +36,7 @@ pub struct ActiveApp {
     pub pid: Option<u32>,
     pub sampled_at: i64,
     pub site: Option<String>,
+    pub is_fullscreen: bool,
 }
 
 impl Default for ActiveApp {
@@ -47,6 +48,7 @@ impl Default for ActiveApp {
             pid: None,
             sampled_at: 0,
             site: None,
+            is_fullscreen: false,
         }
     }
 }

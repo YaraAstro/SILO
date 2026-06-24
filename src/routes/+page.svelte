@@ -100,6 +100,9 @@
     remainingSeconds: number;
   } | null>(null);
 
+  // Keep track of dismissed countdowns so they don't pop up every second
+  let dismissedCountdowns = $state<Set<number>>(new Set());
+
   // Network detailed states
   let detailRange = $state<"today" | "7d" | "30d">("today");
   let detailUsage = $state<DataUsageReport | null>(null);
@@ -265,7 +268,9 @@
       enforcement: string;
     }>("rule_countdown", (event) => {
       countdownData = event.payload;
-      showCountdownOverlay = true;
+      if (!dismissedCountdowns.has(event.payload.ruleId)) {
+        showCountdownOverlay = true;
+      }
     })
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
@@ -762,6 +767,21 @@
             </div>
           </div>
         {/if}
+
+        <div class="flex justify-center pt-2">
+          <button
+            class="silo-button-secondary hover:bg-slate-800 text-slate-400 font-bold px-6 py-2 rounded-lg transition"
+            type="button"
+            onclick={() => {
+              if (countdownData) {
+                dismissedCountdowns.add(countdownData.ruleId);
+              }
+              showCountdownOverlay = false;
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
       </div>
     </div>
   {/if}

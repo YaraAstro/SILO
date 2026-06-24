@@ -147,11 +147,11 @@ fn minimize_active_window() {
     {
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetForegroundWindow, ShowWindow, SW_MINIMIZE,
+                GetForegroundWindow, ShowWindow, SW_FORCEMINIMIZE,
             };
             let hwnd = GetForegroundWindow();
             if !hwnd.0.is_null() {
-                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                let _ = ShowWindow(hwnd, SW_FORCEMINIMIZE);
             }
         }
     }
@@ -242,63 +242,16 @@ pub fn extend_rule_limit(app: &tauri::AppHandle, id: i64, seconds: i64) -> Resul
 #[cfg(target_os = "windows")]
 fn show_native_toast(
     rule_id: i64,
-    target: &str,
+    _target: &str,
     enforcement: &str,
     _limit_seconds: i64,
     remaining_seconds: i64,
+    title: &str,
+    body: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
-
-    let title = match enforcement {
-        "hard" => {
-            if remaining_seconds <= 0 {
-                "Focus Block: Closed".to_string()
-            } else {
-                format!("Hard Block in {}s", remaining_seconds)
-            }
-        }
-        _ => {
-            if remaining_seconds <= 0 {
-                "Limit Reached".to_string()
-            } else {
-                let minutes = remaining_seconds / 60;
-                if minutes > 0 {
-                    format!("Remaining: {}m", minutes)
-                } else {
-                    format!("Remaining: {}s", remaining_seconds)
-                }
-            }
-        }
-    };
-
-    let body = match enforcement {
-        "hard" => {
-            if remaining_seconds <= 0 {
-                format!("Time limit exceeded. {} has been closed.", target)
-            } else {
-                format!("Save your work immediately! {} is closing.", target)
-            }
-        }
-        "warn" => {
-            if remaining_seconds <= 0 {
-                format!("Limit reached! Closed {}. Extend to keep using.", target)
-            } else {
-                format!(
-                    "Warning: Focus limit is approaching for {}. Extend time to keep active.",
-                    target
-                )
-            }
-        }
-        "soft" => {
-            format!(
-                "Time limit reached today. {} minimized to help you stay focused.",
-                target
-            )
-        }
-        _ => "".to_string(),
-    };
 
     let actions_xml = if enforcement == "warn" {
         format!(
@@ -363,6 +316,64 @@ fn trigger_native_toast(
         return;
     }
 
+    let title = match enforcement {
+        "hard" => {
+            if remaining_seconds <= 0 {
+                "Focus Block: Closed".to_string()
+            } else {
+                format!("Hard Block in {}s", remaining_seconds)
+            }
+        }
+        _ => {
+            if remaining_seconds <= 0 {
+                "Limit Reached".to_string()
+            } else {
+                let minutes = remaining_seconds / 60;
+                if minutes > 0 {
+                    format!("Remaining: {}m", minutes)
+                } else {
+                    format!("Remaining: {}s", remaining_seconds)
+                }
+            }
+        }
+    };
+
+    let body = match enforcement {
+        "hard" => {
+            if remaining_seconds <= 0 {
+                format!("Time limit exceeded. {} has been closed.", target)
+            } else {
+                format!("Save your work immediately! {} is closing.", target)
+            }
+        }
+        "warn" => {
+            if remaining_seconds <= 0 {
+                format!("Limit reached! Closed {}. Extend to keep using.", target)
+            } else {
+                format!(
+                    "Warning: Focus limit is approaching for {}. Extend time to keep active.",
+                    target
+                )
+            }
+        }
+        "soft" => {
+            format!(
+                "Time limit reached today. {} minimized to help you stay focused.",
+                target
+            )
+        }
+        _ => "".to_string(),
+    };
+
+    // Show overlay in all warning/block cases when limit is < 60s or 0
+    // ONLY show the overlay if the active app is in fullscreen mode
+    let is_fullscreen = app_handle.state::<AppState>().active_app().is_fullscreen;
+    
+    if is_fullscreen && remaining_seconds <= 60 {
+        let is_hard_block = (enforcement == "hard" || enforcement == "warn") && remaining_seconds <= 0;
+        show_overlay(app_handle, &title, &body, is_hard_block);
+    }
+
     #[cfg(target_os = "windows")]
     {
         if let Err(err) = show_native_toast(
@@ -371,19 +382,84 @@ fn trigger_native_toast(
             enforcement,
             limit_seconds,
             remaining_seconds,
+            &title,
+            &body,
         ) {
             tracing::error!("failed to show native toast: {:?}", err);
         }
     }
 }
 
-fn redirect_active_tab(url: &str) {
+fn show_overlay(
+    app_handle: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+    is_hard_block: bool,
+) {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    if let Some(window) = app_handle.get_webview_window("overlay") {
+        let _ = window.show();
+        let _ = window.set_always_on_top(true);
+        let _ = app_handle.emit(
+            "overlay_update",
+            serde_json::json!({
+                "title": title,
+                "body": body,
+                "is_hard_block": is_hard_block
+            }),
+        );
+        return;
+    }
+
+    let url = format!(
+        "overlay?title={}&body={}&hard={}",
+        urlencoding::encode(title),
+        urlencoding::encode(body),
+        is_hard_block
+    );
+
+    let mut builder = WebviewWindowBuilder::new(app_handle, "overlay", WebviewUrl::App(url.into()))
+        .title("SILO Overlay")
+        .always_on_top(true)
+        .inner_size(420.0, 120.0)
+        .transparent(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .closable(true);
+
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder.decorations(false);
+    }
+
+    if let Ok(window) = builder.build() {
+        if let Ok(Some(monitor)) = window.primary_monitor() {
+            let scale_factor = monitor.scale_factor();
+            let screen_size = monitor.size();
+            let logical_size = tauri::LogicalSize::new(420.0, 120.0);
+            let physical_size = logical_size.to_physical::<u32>(scale_factor);
+            
+            let x = screen_size.width.saturating_sub(physical_size.width + 20);
+            let y = screen_size.height.saturating_sub(physical_size.height + 60);
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+        let _ = window.show();
+    }
+}
+
+fn redirect_active_tab(url: &str, is_fullscreen: bool) {
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
+        let keys = if is_fullscreen {
+            r#"$w.SendKeys('{ESC}'); Start-Sleep -Milliseconds 100; $w.SendKeys('{F11}'); Start-Sleep -Milliseconds 100;"#
+        } else {
+            ""
+        };
         let script = format!(
-            r#"$old = Get-Clipboard -Format Text -ErrorAction SilentlyContinue; Set-Clipboard -Value '{}'; $w = New-Object -ComObject WScript.Shell; $w.SendKeys('^l'); Start-Sleep -Milliseconds 100; $w.SendKeys('^v'); Start-Sleep -Milliseconds 100; $w.SendKeys('~'); Start-Sleep -Milliseconds 400; if ($old) {{ Set-Clipboard -Value $old }} else {{ Clear-Clipboard }}"#,
-            url
+            r#"$old = Get-Clipboard -Format Text -ErrorAction SilentlyContinue; Set-Clipboard -Value '{}'; $w = New-Object -ComObject WScript.Shell; {}$w.SendKeys('^l'); Start-Sleep -Milliseconds 100; $w.SendKeys('^v'); Start-Sleep -Milliseconds 100; $w.SendKeys('~'); Start-Sleep -Milliseconds 400; if ($old) {{ Set-Clipboard -Value $old }} else {{ Clear-Clipboard }}"#,
+            url, keys
         );
         let _ = Command::new("powershell")
             .args(["-NoProfile", "-Command", &script])
@@ -482,7 +558,7 @@ fn check_and_enforce_rules(
                         }),
                     );
 
-                    if (remaining == 60 || remaining == 30 || remaining == 10 || remaining <= 5)
+                    if (remaining == 60 || remaining == 30 || remaining == 10)
                         && rule_state.last_countdown_sec != Some(remaining)
                     {
                         rule_state.last_countdown_sec = Some(remaining);
@@ -509,7 +585,7 @@ fn check_and_enforce_rules(
                     }
 
                     if rule.rule_type == "site" {
-                        redirect_active_tab(&blocked_url);
+                        redirect_active_tab(&blocked_url, active_app.is_fullscreen);
                     } else {
                         close_target_app(active_app.pid);
                     }
@@ -595,14 +671,16 @@ fn check_and_enforce_rules(
                     if remaining <= 60 {
                         if rule_state.last_countdown_sec != Some(remaining) {
                             rule_state.last_countdown_sec = Some(remaining);
-                            trigger_native_toast(
-                                app_handle,
-                                rule_id,
-                                &rule.target,
-                                "warn",
-                                limit,
-                                remaining,
-                            );
+                            if remaining == 60 || remaining == 30 || remaining == 10 {
+                                trigger_native_toast(
+                                    app_handle,
+                                    rule_id,
+                                    &rule.target,
+                                    "warn",
+                                    limit,
+                                    remaining,
+                                );
+                            }
                         }
 
                         let _ = app_handle.emit(
@@ -629,7 +707,7 @@ fn check_and_enforce_rules(
                     }
 
                     if rule.rule_type == "site" {
-                        redirect_active_tab(&blocked_url);
+                        redirect_active_tab(&blocked_url, active_app.is_fullscreen);
                     } else {
                         close_target_app(active_app.pid);
                     }
@@ -710,6 +788,14 @@ fn check_and_enforce_rules(
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+fn close_overlay(app_handle: tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app_handle.get_webview_window("overlay") {
+        let _ = window.close();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -906,7 +992,8 @@ pub fn run() {
             get_network_history,
             add_rule_time,
             get_usage_range,
-            get_rule_stats
+            get_rule_stats,
+            close_overlay
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
