@@ -317,6 +317,28 @@
       </div>
     </section>
 
+    <section class="silo-card p-6">
+      <div class="flex items-center gap-3">
+        <IconBadge icon={RefreshCw} tone="teal" label="Updates" />
+        <h2 class="text-lg font-bold">Updates</h2>
+      </div>
+      <div class="mt-6 flex items-center justify-between">
+        <div>
+          <p class="font-semibold text-slate-200">Application Updates</p>
+          <p class="mt-1 text-sm text-slate-500">Current version: v0.5.0-pre</p>
+        </div>
+        <button
+          class="silo-button-secondary"
+          type="button"
+          onclick={checkForUpdates}
+          disabled={checkingUpdate}
+        >
+          <RefreshCw size={16} class={checkingUpdate ? 'animate-spin mr-2' : 'mr-2'} />
+          {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+        </button>
+      </div>
+    </section>
+
     <section class="silo-card p-6 relative overflow-hidden">
       <!-- Subtle gradient background glow -->
       <div class="absolute -right-16 -top-16 w-36 h-36 bg-gradient-to-br from-teal-500/10 to-purple-500/10 rounded-full blur-2xl pointer-events-none"></div>
@@ -331,14 +353,6 @@
           <div class="flex items-center gap-2">
             <span class="text-2xl font-black bg-gradient-to-r from-teal-400 to-purple-400 bg-clip-text text-transparent">SILO</span>
             <span class="text-xs font-mono font-bold bg-slate-800 text-teal-400 px-2 py-0.5 rounded border border-teal-500/10">v0.5.0-pre</span>
-            <button
-              class="ml-2 flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-              onclick={checkForUpdates}
-              disabled={checkingUpdate}
-            >
-              <RefreshCw size={12} class={checkingUpdate ? 'animate-spin' : ''} />
-              {checkingUpdate ? 'Checking...' : 'Check for Updates'}
-            </button>
           </div>
           <p class="text-sm text-slate-300 max-w-lg leading-relaxed">
             A local-first, privacy-focused productivity and digital wellness platform. Monitor screen time, control distractions, and analyze internet usage in real-time.
