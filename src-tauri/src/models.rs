@@ -192,3 +192,28 @@ pub struct RuleStats {
     pub times_blocked: i64,
     pub times_bypassed: i64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_active_app_default() {
+        let app = ActiveApp::default();
+        assert_eq!(app.app, "SILO");
+        assert_eq!(app.title, "Monitoring engine pending");
+        assert_eq!(app.elapsed_seconds, 0);
+        assert_eq!(app.is_fullscreen, false);
+    }
+
+    #[test]
+    fn test_settings_default() {
+        let settings = Settings::default();
+        assert_eq!(settings.auto_start, false);
+        assert_eq!(settings.theme, "system");
+        assert_eq!(settings.retention_days, 90);
+        assert_eq!(settings.notifications_enabled, true);
+        assert_eq!(settings.sample_interval_seconds, 5);
+        assert_eq!(settings.shortcuts_enabled, true);
+    }
+}

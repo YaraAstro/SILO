@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "pnpm run test:unit && pnpm run test:rust && pnpm run test:e2e"
   },
   "license": "MIT",
   "dependencies": {
@@ -20,15 +24,20 @@
     "lucide-svelte": "^1.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.4.2",
+    "jsdom": "^29.1.1",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tailwindcss": "^4.3.0",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^4.1.9"
   }
 }
