@@ -33,5 +33,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "YOUR_UPDATER_PUBLIC_KEY",
+      "endpoints": [
+        "https://releases.silo.example.com/{{target}}/{{current_version}}"
+      ]
+    }
   }
 }
