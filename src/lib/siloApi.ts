@@ -22,6 +22,15 @@ export type Rule = {
   updatedAt: number;
   extraLimitSeconds?: number;
   extraLimitDate?: string | null;
+  presetId?: number | null;
+};
+
+export type Preset = {
+  id: number | null;
+  name: string;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type BootStatus = {
@@ -111,6 +120,7 @@ export const emptyRule = (): Rule => ({
   updatedAt: 0,
   extraLimitSeconds: 0,
   extraLimitDate: null,
+  presetId: null,
 });
 
 export const siloApi = {
@@ -122,6 +132,9 @@ export const siloApi = {
   getRules: () => invoke<Rule[]>("get_rules"),
   saveRule: (rule: Rule) => invoke<Rule>("save_rule", { rule }),
   deleteRule: (id: number) => invoke<void>("delete_rule", { id }),
+  getPresets: () => invoke<Preset[]>("get_presets"),
+  savePreset: (preset: Preset) => invoke<Preset>("save_preset", { preset }),
+  deletePreset: (id: number) => invoke<void>("delete_preset", { id }),
   getUsage: (date: string) => invoke<UsageReport>("get_usage", { date }),
   getUsageRange: (range: string) => invoke<UsageReport>("get_usage_range", { range }),
   getUsage90d: () => invoke<UsageTimeline>("get_usage_90d"),

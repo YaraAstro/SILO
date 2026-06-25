@@ -1,7 +1,7 @@
 use crate::{
     models::{
         AppSnapshot, BootStatus, DataUsageReport, ExportResult, NetworkSpeed, Rule, Settings,
-        UsageDayBytes,
+        UsageDayBytes, Preset,
     },
     AppState,
 };
@@ -92,6 +92,31 @@ pub fn delete_rule(app: AppHandle, state: State<'_, AppState>, id: i64) -> Comma
 #[tauri::command]
 pub fn add_rule_time(app: AppHandle, id: i64, seconds: i64) -> CommandResult<()> {
     crate::extend_rule_limit(&app, id, seconds)
+}
+
+#[tauri::command]
+pub fn get_presets(state: State<'_, AppState>) -> CommandResult<Vec<Preset>> {
+    state.storage().presets().map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn save_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset: Preset,
+) -> CommandResult<Preset> {
+    let saved = state.storage().save_preset(preset).map_err(to_command_error)?;
+    let _ = app.emit("presets_changed", &saved);
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn delete_preset(app: AppHandle, state: State<'_, AppState>, id: i64) -> CommandResult<()> {
+    state.storage().delete_preset(id).map_err(to_command_error)?;
+    let _ = app.emit("presets_changed", ());
+    // Cascade delete of rules might have happened, notify rules_changed
+    let _ = app.emit("rules_changed", ());
+    Ok(())
 }
 
 #[tauri::command]

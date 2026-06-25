@@ -20,7 +20,8 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cleanDomain } from "$lib/utils/cleanDomain";
   import { siloApi, emptyRule } from "$lib/siloApi";
-  import type { Rule, AppSnapshot, Settings, UsageReport } from "$lib/siloApi";
+    import type { Rule, AppSnapshot, Settings, UsageReport, Preset } from "$lib/siloApi";
+  import { FolderPlus, Folder, FolderHeart, Edit, Check, X } from "lucide-svelte";
 
   let {
     rules = $bindable(),
@@ -30,6 +31,7 @@
     activeView = $bindable(),
     showToast,
     isAuthorized = $bindable(false),
+    presets = $bindable([]),
   } = $props<{
     rules: Rule[];
     snapshot: AppSnapshot | null;
@@ -38,6 +40,7 @@
     activeView: string;
     showToast: (message: string, type?: "success" | "error" | "info") => void;
     isAuthorized?: boolean;
+    presets: Preset[];
   }>();
 
   // Rules-specific UI states
@@ -50,6 +53,19 @@
   let showAppDropdown = $state(false);
   let showSiteDropdown = $state(false);
   let availableApps = $state<string[]>([]);
+
+  // Presets local state
+  let selectedPreset = $state<Preset | null>(null);
+  let newPresetName = $state("");
+  let editingPresetId = $state<number | null>(null);
+  let editingPresetName = $state("");
+
+  // Select default preset automatically
+  $effect(() => {
+    if (presets.length > 0 && !selectedPreset) {
+      selectedPreset = presets.find((p: Preset) => p.name === "Default Preset") || presets[0];
+    }
+  });
 
   // Lock screen specific states
   let pinInput = $state("");
@@ -171,10 +187,18 @@
       showToast("Rule target is required.", "error");
       return;
     }
+    if (!selectedPreset) {
+      showToast("Please select or create a preset first.", "error");
+      return;
+    }
 
     savingRule = true;
     try {
-      await siloApi.saveRule({ ...ruleDraft, target: ruleDraft.target.trim() });
+      await siloApi.saveRule({ 
+        ...ruleDraft, 
+        target: ruleDraft.target.trim(),
+        presetId: selectedPreset.id
+      });
       ruleDraft = emptyRule();
       showRuleForm = false;
       rules = await siloApi.getRules();
@@ -184,6 +208,81 @@
       showToast(toErrorMessage(error), "error");
     } finally {
       savingRule = false;
+    }
+  }
+
+  // Presets handlers
+  async function createPreset() {
+    const name = newPresetName.trim();
+    if (!name) return;
+    try {
+      const saved = await siloApi.savePreset({
+        id: null,
+        name,
+        active: true,
+        createdAt: 0,
+        updatedAt: 0
+      });
+      newPresetName = "";
+      presets = await siloApi.getPresets();
+      selectedPreset = saved;
+      showToast(`Preset "${name}" created successfully!`, "success");
+    } catch (err) {
+      showToast(toErrorMessage(err), "error");
+    }
+  }
+
+  async function togglePresetActive(preset: Preset) {
+    try {
+      const updated = { ...preset, active: !preset.active };
+      await siloApi.savePreset(updated);
+      presets = await siloApi.getPresets();
+      if (selectedPreset && selectedPreset.id === preset.id) {
+        selectedPreset = updated;
+      }
+      showToast(
+        `Preset "${preset.name}" ${updated.active ? "activated" : "paused"}.`,
+        "success"
+      );
+    } catch (err) {
+      showToast(toErrorMessage(err), "error");
+    }
+  }
+
+  async function deletePreset(preset: Preset) {
+    if (preset.id === null) return;
+    try {
+      await siloApi.deletePreset(preset.id);
+      presets = await siloApi.getPresets();
+      rules = await siloApi.getRules();
+      selectedPreset = presets[0] || null;
+      showToast(`Preset "${preset.name}" deleted.`, "info");
+    } catch (err) {
+      showToast(toErrorMessage(err), "error");
+    }
+  }
+
+  function renamePreset(preset: Preset) {
+    editingPresetId = preset.id;
+    editingPresetName = preset.name;
+  }
+
+  async function savePresetRename() {
+    if (editingPresetId === null || !editingPresetName.trim()) return;
+    const name = editingPresetName.trim();
+    const preset = presets.find((p: Preset) => p.id === editingPresetId);
+    if (!preset) return;
+    try {
+      const updated = { ...preset, name };
+      const saved = await siloApi.savePreset(updated);
+      presets = await siloApi.getPresets();
+      if (selectedPreset && selectedPreset.id === editingPresetId) {
+        selectedPreset = saved;
+      }
+      editingPresetId = null;
+      showToast(`Preset renamed to "${name}".`, "success");
+    } catch (err) {
+      showToast(toErrorMessage(err), "error");
     }
   }
 
@@ -289,9 +388,14 @@
   }
 
   function filteredRules() {
+    let list = rules;
+    if (selectedPreset) {
+      const selectedId = selectedPreset.id;
+      list = rules.filter((r: Rule) => r.presetId === selectedId);
+    }
     const query = ruleSearch.trim().toLowerCase();
-    if (!query) return rules;
-    return rules.filter(
+    if (!query) return list;
+    return list.filter(
       (rule: Rule) =>
         rule.target.toLowerCase().includes(query) ||
         rule.ruleType.includes(query),
@@ -327,7 +431,7 @@
         <h2 class="text-3xl font-mono font-black text-slate-100 tracking-wider">
           {lockTime.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
         </h2>
-        <p class="text-[11px] text-teal-450 font-bold tracking-wide">
+        <p class="text-[11px] text-teal-400 font-bold tracking-wide">
           {lockTime.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
         </p>
       </div>
@@ -398,6 +502,150 @@
         {/if}
       </button>
     </header>
+
+    <!-- Presets Section -->
+    <div class="silo-card p-6 border border-slate-800 bg-slate-900/30 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-black text-slate-100 flex items-center gap-2">
+            <FolderHeart size={18} class="text-teal-400" />
+            Rules Presets
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Toggle active collections or select to edit their rules.</p>
+        </div>
+
+        <!-- Add Preset form -->
+        <div class="flex items-center gap-2">
+          <input
+            class="silo-input text-xs max-w-[200px]"
+            placeholder="New preset name..."
+            bind:value={newPresetName}
+            onkeydown={(e) => e.key === "Enter" && createPreset()}
+          />
+          <button
+            class="silo-button px-3.5 py-2 text-xs flex items-center gap-1"
+            type="button"
+            onclick={createPreset}
+          >
+            <FolderPlus size={14} />
+            Add Preset
+          </button>
+        </div>
+      </div>
+
+      <!-- Presets list (Horizontal Scroll View) -->
+      <div class="flex gap-4 overflow-x-auto pb-4 pt-2 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent snap-x">
+        {#each presets as preset (preset.id ?? preset.name)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex-shrink-0 snap-start p-4 rounded-2xl border transition-all duration-300 flex flex-col justify-between gap-3 relative overflow-hidden group cursor-pointer min-w-[210px] max-w-[260px]
+              {selectedPreset?.id === preset.id
+                ? 'border-teal-500/50 bg-teal-500/10 shadow-[0_0_15px_rgba(45,212,191,0.15)]'
+                : 'border-slate-800 bg-slate-950/40 hover:bg-slate-900/40 hover:border-slate-700'}"
+            onclick={() => { selectedPreset = preset; }}
+          >
+            <div class="flex items-start justify-between min-w-0">
+              <div class="min-w-0 pr-2">
+                {#if editingPresetId === preset.id}
+                  <input
+                    class="silo-input text-xs font-bold py-1 px-2 border-slate-700 focus:border-teal-500 max-w-[140px]"
+                    bind:value={editingPresetName}
+                    onclick={(e) => e.stopPropagation()}
+                    onkeydown={(e) => {
+                      if (e.key === "Enter") {
+                        e.stopPropagation();
+                        savePresetRename();
+                      } else if (e.key === "Escape") {
+                        e.stopPropagation();
+                        editingPresetId = null;
+                      }
+                    }}
+                  />
+                {:else}
+                  <h3 class="font-bold text-sm text-slate-100 truncate flex items-center gap-1.5" title={preset.name}>
+                    <Folder size={14} class={preset.active ? 'text-teal-400' : 'text-slate-500'} />
+                    {preset.name}
+                  </h3>
+                {/if}
+                <p class="text-[10px] text-slate-400 mt-1 font-semibold">
+                  {rules.filter((r: Rule) => r.presetId === preset.id).length} rules configured
+                </p>
+              </div>
+
+              <!-- Active Toggle -->
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div onclick={(e) => e.stopPropagation()}>
+                <ToggleSwitch
+                  checked={preset.active}
+                  label="Preset active"
+                  onchange={() => togglePresetActive(preset)}
+                />
+              </div>
+            </div>
+
+            <!-- Inline controls -->
+            <div class="flex items-center justify-between border-t border-slate-800/60 pt-2 mt-1">
+              <span class="text-[9px] uppercase font-black tracking-widest {preset.active ? 'text-teal-400' : 'text-slate-500'}">
+                {preset.active ? 'Active Mode' : 'Inactive'}
+              </span>
+
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity" onclick={(e) => e.stopPropagation()}>
+                {#if editingPresetId === preset.id}
+                  <button
+                    class="p-1 text-teal-400 hover:text-teal-300 hover:bg-teal-500/10 rounded"
+                    type="button"
+                    aria-label="Save Rename"
+                    onclick={savePresetRename}
+                  >
+                    <Check size={12} />
+                  </button>
+                  <button
+                    class="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
+                    type="button"
+                    aria-label="Cancel Rename"
+                    onclick={() => { editingPresetId = null; }}
+                  >
+                    <X size={12} />
+                  </button>
+                {:else}
+                  <button
+                    class="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
+                    type="button"
+                    aria-label="Rename Preset"
+                    onclick={() => renamePreset(preset)}
+                  >
+                    <Edit size={12} />
+                  </button>
+                  {#if preset.name !== 'Default Preset'}
+                    <button
+                      class="p-1 text-red-400 hover:text-red-300 hover:bg-red-950/20 rounded"
+                      type="button"
+                      aria-label="Delete Preset"
+                      onclick={() => deletePreset(preset)}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  {/if}
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Active Preset rules section header -->
+    <div class="flex items-center justify-between border-b border-slate-800/80 pb-3 pt-2 mt-4">
+      <h2 class="text-xl font-black text-slate-200 flex items-center gap-2">
+        <Folder size={18} class="text-teal-400" />
+        Rules in "{selectedPreset?.name || 'No Preset Selected'}"
+      </h2>
+      <span class="text-xs text-slate-400 font-bold bg-slate-900/60 px-3 py-1 rounded-full border border-slate-800">{filteredRules().length} rules found</span>
+    </div>
 
     {#if showRuleForm}
       <div transition:slide={{ duration: 250 }}>

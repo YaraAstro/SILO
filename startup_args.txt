@@ -1,1 +1,1 @@
-["C:\\Users\\ASUS\\AppData\\Local\\SILO\\silo.exe", "--minimized"]
+["target\\debug\\silo.exe"]

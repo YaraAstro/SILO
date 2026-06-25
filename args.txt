@@ -1,1 +1,1 @@
-["D:\\Devs\\project_silo\\attempt_VI\\silo\\silo\\src-tauri\\target\\debug\\silo.exe", "silo://unlock-focus/?pin="]
+["target\\debug\\silo.exe"]

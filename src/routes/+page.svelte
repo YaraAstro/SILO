@@ -28,6 +28,7 @@ import { open } from "@tauri-apps/plugin-dialog";
     type DataUsageReport,
     type UsageDayBytes,
     type DataConsumer,
+    type Preset,
   } from "$lib/siloApi";
 
   // Import views
@@ -61,6 +62,7 @@ import { open } from "@tauri-apps/plugin-dialog";
   let boot = $state<BootStatus | null>(null);
   let snapshot = $state<AppSnapshot | null>(null);
   let rules = $state<Rule[]>([]);
+  let presets = $state<Preset[]>([]);
   let settings = $state<Settings | null>(null);
   let usage = $state<UsageReport | null>(null);
   let usageTab = $state<"apps" | "sites">("apps");
@@ -221,6 +223,14 @@ import { open } from "@tauri-apps/plugin-dialog";
     void loadAll();
     const timer = window.setInterval(() => void refreshLiveState(), 5000);
 
+    void listen("presets_changed", () => {
+      void loadPresets();
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    void listen("rules_changed", () => {
+      void loadRules();
+    }).then((unlisten) => unlisteners.push(unlisten));
+
     void listen("request_pin_unlock", () => {
       pinModalType = "focus";
       unlockingFromTray = true;
@@ -342,6 +352,7 @@ import { open } from "@tauri-apps/plugin-dialog";
       await Promise.all([
         loadSnapshot(),
         loadRules(),
+        loadPresets(),
         loadTodayUsage(),
         loadTimeline(),
         loadDataUsage(dataRange),
@@ -360,6 +371,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 
   async function loadRules() {
     rules = await siloApi.getRules();
+  }
+
+  async function loadPresets() {
+    presets = await siloApi.getPresets();
   }
 
   async function loadTodayUsage() {
@@ -643,6 +658,7 @@ import { open } from "@tauri-apps/plugin-dialog";
           {toggleFocus}
           {handleRefresh}
           {openMoreScreen}
+          bind:presets
         />
       {:else if activeView === "rules"}
         <RulesView
@@ -653,6 +669,7 @@ import { open } from "@tauri-apps/plugin-dialog";
           bind:activeView
           {showToast}
           bind:isAuthorized={rulesAuthorized}
+          bind:presets
         />
       {:else if activeView === "stats"}
         <StatsView

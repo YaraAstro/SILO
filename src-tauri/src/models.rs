@@ -86,6 +86,19 @@ pub struct Rule {
     #[serde(default)]
     pub extra_limit_seconds: i64,
     pub extra_limit_date: Option<String>,
+    pub preset_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preset {
+    pub id: Option<i64>,
+    pub name: String,
+    pub active: bool,
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

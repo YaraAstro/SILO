@@ -21,7 +21,10 @@
   import TrendChart from "$lib/components/TrendChart.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cleanDomain } from "$lib/utils/cleanDomain";
-  import type { BootStatus, AppSnapshot, Rule, UsageReport, UsageTimeline, DataUsageReport, UsageDayBytes } from "$lib/siloApi";
+  import type { BootStatus, AppSnapshot, Rule, UsageReport, UsageTimeline, DataUsageReport, UsageDayBytes, Preset } from "$lib/siloApi";
+  import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
+  import { siloApi } from "$lib/siloApi";
+  import { Folder, FolderHeart } from "lucide-svelte";
 
   let {
     snapshot,
@@ -37,7 +40,8 @@
     liveNetworkSamples,
     toggleFocus,
     handleRefresh,
-    openMoreScreen
+    openMoreScreen,
+    presets = $bindable([])
   } = $props<{
     snapshot: AppSnapshot | null;
     boot: BootStatus | null;
@@ -53,13 +57,16 @@
     toggleFocus: () => Promise<void>;
     handleRefresh: () => Promise<void>;
     openMoreScreen: (title: string, rows: any[]) => Promise<void>;
+    presets: Preset[];
   }>();
 
   // Dynamic calculations
   let focusScoreValue = $derived.by(() => {
     let score = 100;
+    const activePresetIds = new Set(presets.filter((p: Preset) => p.active).map((p: Preset) => p.id));
     rules.forEach((rule: Rule) => {
-      if (rule.active) {
+      const isPresetActive = rule.presetId ? activePresetIds.has(rule.presetId) : false;
+      if (rule.active && isPresetActive) {
         const remaining = getRuleRemainingSeconds(rule);
         const limit = rule.extraLimitDate === new Date().toISOString().slice(0, 10)
           ? rule.limitSeconds + (rule.extraLimitSeconds ?? 0)
@@ -146,8 +153,10 @@
     }
 
     let limitWarning = false;
+    const activePresetIds = new Set(presets.filter((p: Preset) => p.active).map((p: Preset) => p.id));
     rules.forEach((rule: Rule) => {
-      if (rule.active) {
+      const isPresetActive = rule.presetId ? activePresetIds.has(rule.presetId) : false;
+      if (rule.active && isPresetActive) {
         const remaining = getRuleRemainingSeconds(rule);
         if (remaining > 0 && remaining <= 300) {
           limitWarning = true;
@@ -365,7 +374,62 @@
         </button>
       </div>
     </div>
+
   </header>
+
+  <!-- Isolated Presets Tile -->
+  <section class="silo-card p-6 border border-slate-800 bg-slate-950/45 relative overflow-hidden group hover:border-teal-500/20 transition-all duration-300">
+    <div class="absolute -right-8 -top-8 h-20 w-20 rounded-full bg-teal-500/5 blur-xl group-hover:bg-teal-500/10 transition-colors"></div>
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+        <FolderHeart size={14} class="text-teal-400" />
+        Active Focus Presets
+      </h3>
+      {#if snapshot?.focusMode}
+        <span class="text-[9px] font-black uppercase tracking-wider text-red-400 px-2 py-0.5 rounded-full border border-red-500/20 bg-red-500/5 animate-pulse">Locked</span>
+      {/if}
+    </div>
+
+    <!-- Horizontal Slider -->
+    <div class="flex gap-3 overflow-x-auto pb-2 pt-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent snap-x">
+      {#each presets as preset (preset.id ?? preset.name)}
+        <label
+          class="flex-shrink-0 snap-start flex items-center justify-between gap-4 p-3 rounded-xl border transition-all duration-300 select-none min-w-[170px] max-w-[220px]
+            {preset.active
+              ? 'border-teal-500/30 bg-teal-500/5 text-teal-200 shadow-[0_2px_8px_rgba(45,212,191,0.05)]'
+              : 'border-slate-800 bg-slate-950/30 text-slate-400 hover:border-slate-700/60 hover:bg-slate-900/30'}
+            {snapshot?.focusMode ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}"
+        >
+          <div class="flex items-center gap-2.5 min-w-0 flex-1">
+            <Folder size={14} class={preset.active ? 'text-teal-400' : 'text-slate-500'} />
+            <span class="text-xs font-bold truncate" title={preset.name}>{preset.name}</span>
+          </div>
+          
+          <div class="flex items-center gap-2 shrink-0">
+            {#if snapshot?.focusMode}
+              <span class="text-[9px] font-black uppercase tracking-wider {preset.active ? 'text-teal-400' : 'text-slate-500'}">
+                {preset.active ? 'ON' : 'OFF'}
+              </span>
+            {:else}
+              <ToggleSwitch
+                checked={preset.active}
+                label="Preset active"
+                onchange={async () => {
+                  try {
+                    const updated = { ...preset, active: !preset.active };
+                    await siloApi.savePreset(updated);
+                    presets = await siloApi.getPresets();
+                  } catch (err) {
+                    console.error("Failed to toggle preset:", err);
+                  }
+                }}
+              />
+            {/if}
+          </div>
+        </label>
+      {/each}
+    </div>
+  </section>
 
   <!-- Metrics cards row -->
   <div class="grid gap-5 md:grid-cols-3">

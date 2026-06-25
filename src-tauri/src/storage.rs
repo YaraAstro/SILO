@@ -126,7 +126,7 @@ impl Storage {
         let conn = self.connection.lock();
         let mut statement = conn.prepare(
             "SELECT id, type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at,
-                    COALESCE(extra_limit_seconds, 0), extra_limit_date
+                    COALESCE(extra_limit_seconds, 0), extra_limit_date, preset_id
              FROM rules
              ORDER BY active DESC, updated_at DESC, target ASC",
         )?;
@@ -143,6 +143,7 @@ impl Storage {
                 updated_at: row.get(8)?,
                 extra_limit_seconds: row.get(9)?,
                 extra_limit_date: row.get(10)?,
+                preset_id: row.get(11)?,
             })
         })?;
 
@@ -154,13 +155,39 @@ impl Storage {
 
         let conn = self.connection.lock();
         let now = Utc::now().timestamp();
+
+        // Ensure rule has a preset_id
+        let preset_id = match rule.preset_id {
+            Some(pid) => pid,
+            None => {
+                let pid: Option<i64> = conn
+                    .query_row(
+                        "SELECT id FROM presets ORDER BY id ASC LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                match pid {
+                    Some(id) => id,
+                    None => {
+                        conn.execute(
+                            "INSERT INTO presets (name, active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                            params!["Default Preset", 1, now, now],
+                        )?;
+                        conn.last_insert_rowid()
+                    }
+                }
+            }
+        };
+        rule.preset_id = Some(preset_id);
+
         match rule.id {
             Some(id) => {
                 conn.execute(
                     "UPDATE rules
                      SET type = ?1, target = ?2, limit_seconds = ?3, enforcement = ?4,
-                         active = ?5, schedule = ?6, updated_at = ?7, extra_limit_seconds = ?8, extra_limit_date = ?9
-                     WHERE id = ?10",
+                         active = ?5, schedule = ?6, updated_at = ?7, extra_limit_seconds = ?8, extra_limit_date = ?9, preset_id = ?10
+                     WHERE id = ?11",
                     params![
                         &rule.rule_type,
                         &rule.target,
@@ -171,6 +198,7 @@ impl Storage {
                         now,
                         rule.extra_limit_seconds,
                         &rule.extra_limit_date,
+                        rule.preset_id,
                         id
                     ],
                 )?;
@@ -180,8 +208,8 @@ impl Storage {
             None => {
                 conn.execute(
                     "INSERT INTO rules
-                     (type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at, extra_limit_seconds, extra_limit_date)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                     (type, target, limit_seconds, enforcement, active, schedule, created_at, updated_at, extra_limit_seconds, extra_limit_date, preset_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         &rule.rule_type,
                         &rule.target,
@@ -192,7 +220,8 @@ impl Storage {
                         now,
                         now,
                         rule.extra_limit_seconds,
-                        &rule.extra_limit_date
+                        &rule.extra_limit_date,
+                        rule.preset_id
                     ],
                 )?;
                 rule.id = Some(conn.last_insert_rowid());
@@ -207,6 +236,76 @@ impl Storage {
         self.connection
             .lock()
             .execute("DELETE FROM rules WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn presets(&self) -> anyhow::Result<Vec<crate::models::Preset>> {
+        let conn = self.connection.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, name, active, created_at, updated_at
+             FROM presets
+             ORDER BY name ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(crate::models::Preset {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                active: row.get::<_, i64>(2)? == 1,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn save_preset(&self, mut preset: crate::models::Preset) -> anyhow::Result<crate::models::Preset> {
+        let name = preset.name.trim().to_string();
+        if name.is_empty() {
+            anyhow::bail!("Preset name is required");
+        }
+        preset.name = name;
+
+        let conn = self.connection.lock();
+        let now = Utc::now().timestamp();
+        match preset.id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE presets
+                     SET name = ?1, active = ?2, updated_at = ?3
+                     WHERE id = ?4",
+                    params![
+                        &preset.name,
+                        bool_to_int(preset.active),
+                        now,
+                        id
+                    ],
+                )?;
+                preset.updated_at = now;
+                Ok(preset)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO presets (name, active, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        &preset.name,
+                        bool_to_int(preset.active),
+                        now,
+                        now
+                    ],
+                )?;
+                preset.id = Some(conn.last_insert_rowid());
+                preset.created_at = now;
+                preset.updated_at = now;
+                Ok(preset)
+            }
+        }
+    }
+
+    pub fn delete_preset(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.connection.lock();
+        conn.execute("DELETE FROM presets WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -438,6 +537,54 @@ impl Storage {
             [],
         );
         let _ = conn.execute("ALTER TABLE rules ADD COLUMN extra_limit_date TEXT", []);
+
+        // Create presets table if not exists
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS presets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                active INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        // Check if rules has preset_id column, if not, add it
+        let mut pragma_statement = conn.prepare("PRAGMA table_info(rules)")?;
+        let mut pragma_rows = pragma_statement.query([])?;
+        let mut has_preset_id = false;
+        while let Some(row) = pragma_rows.next()? {
+            let name: String = row.get(1)?;
+            if name == "preset_id" {
+                has_preset_id = true;
+                break;
+            }
+        }
+
+        if !has_preset_id {
+            let _ = conn.execute(
+                "ALTER TABLE rules ADD COLUMN preset_id INTEGER REFERENCES presets(id) ON DELETE CASCADE",
+                [],
+            );
+        }
+
+        // Initialize a default preset and move any rules without a preset to it
+        let preset_count: i64 = conn.query_row("SELECT COUNT(*) FROM presets", [], |row| row.get(0))?;
+        if preset_count == 0 {
+            let now = Utc::now().timestamp();
+            conn.execute(
+                "INSERT INTO presets (name, active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params!["Default Preset", 1, now, now],
+            )?;
+            let default_preset_id = conn.last_insert_rowid();
+
+            // Assign existing rules to this default preset
+            conn.execute(
+                "UPDATE rules SET preset_id = ?1 WHERE preset_id IS NULL",
+                params![default_preset_id],
+            )?;
+        }
 
         conn.execute(
             "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
