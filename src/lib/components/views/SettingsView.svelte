@@ -10,9 +10,12 @@
     Keyboard,
     Info,
     RefreshCw,
+    Lock,
   } from "lucide-svelte";
+  import { fade } from "svelte/transition";
   import IconBadge from "$lib/components/IconBadge.svelte";
   import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
+  import OtpInput from "$lib/components/OtpInput.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { check } from "@tauri-apps/plugin-updater";
   import { ask, message } from "@tauri-apps/plugin-dialog";
@@ -33,9 +36,25 @@
   let exporting = $state(false);
   let exportPath = $state("");
   let checkingUpdate = $state(false);
+  let showPinModal = $state(false);
+  let pinInput = $state("");
 
   // Handler functions
-  async function saveSettings() {
+  function getTodayPin() {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, "0");
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const yy = String(today.getFullYear()).slice(-2);
+    return `${dd}${mm}${yy}`;
+  }
+
+  function saveSettings() {
+    if (!settings) return;
+    showPinModal = true;
+    pinInput = "";
+  }
+
+  async function executeSaveSettings() {
     if (!settings) return;
     savingSettings = true;
     try {
@@ -47,6 +66,22 @@
     } finally {
       savingSettings = false;
     }
+  }
+
+  function submitPin() {
+    if (pinInput === getTodayPin()) {
+      showPinModal = false;
+      executeSaveSettings();
+      pinInput = "";
+    } else {
+      showToast("Incorrect PIN. Access denied.", "error");
+      pinInput = "";
+    }
+  }
+
+  function cancelPin() {
+    showPinModal = false;
+    pinInput = "";
   }
 
   async function completeBackup() {
@@ -409,6 +444,50 @@
       </button>
     </section>
   </section>
+{/if}
+
+<!-- PIN Modal for Settings Save -->
+{#if showPinModal}
+  <div
+    transition:fade={{ duration: 200 }}
+    class="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-in fade-in"
+  >
+    <div class="silo-card max-w-sm w-full p-6 border border-slate-700/50 bg-slate-900/95 shadow-2xl">
+      <div class="text-center mb-6">
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-purple-500/10 text-purple-400 mb-3 border border-purple-500/20">
+          <Lock size={20} class="animate-pulse" />
+        </div>
+        <h2 class="text-xl font-bold text-slate-100">
+          Authorize Settings Update
+        </h2>
+        <p class="text-xs text-slate-400 mt-2">
+          Enter today's PIN to authorize settings changes.
+        </p>
+      </div>
+      <div class="mb-6">
+        <OtpInput
+          bind:value={pinInput}
+          length={6}
+          onsubmit={submitPin}
+          oncancel={cancelPin}
+        />
+      </div>
+      <div class="flex gap-3">
+        <button
+          class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-lg transition"
+          onclick={cancelPin}
+        >
+          Cancel
+        </button>
+        <button
+          class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-lg transition shadow-lg shadow-purple-900/20"
+          onclick={submitPin}
+        >
+          Authorize
+        </button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#snippet SettingToggle(
