@@ -1,3 +1,50 @@
+# SILO Release Notes v1.1.0 (PIN-Authorized Settings Protection)
+
+Welcome to **SILO v1.1.0**! This release introduces critical settings security, requiring PIN authorization before modifying configurations.
+
+---
+
+## 🚀 Key Highlights
+
+### 1. PIN-Authorized Settings Protection
+We have added a security guard to the Settings panel:
+* **Authorization Dialog**: When clicking "Save Settings", a new high-fidelity authentication modal is presented.
+* **PIN Validation**: You must enter today's local date-based PIN (`ddmmyy`) to authorize and write configurations to the SQLite database.
+* **Improved UX**: Prevents unauthorized modifications by third parties or accidental edits during focus sessions.
+
+---
+
+## 🛠️ Code Changes & Affected Files
+
+| Component | File Path | Description |
+| :--- | :--- | :--- |
+| **Workspace Manifests** | [`package.json`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/package.json) | Bumped version to `1.1.0`. |
+| **Backend Manifests** | [`Cargo.toml`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/Cargo.toml) | Bumped package version to `1.1.0`. |
+| **Tauri Core Configuration** | [`tauri.conf.json`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/tauri.conf.json) | Bumped configuration build version to `1.1.0`. |
+| **Settings view** | [`src/lib/components/views/SettingsView.svelte`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src/lib/components/views/SettingsView.svelte) | Implemented PIN save overlay check, imports, state variables, and callbacks. |
+
+---
+
+## 📝 How to Verify the Release
+
+1. **Verify Cargo Build and Package Sync**:
+   ```bash
+   cargo check --manifest-path src-tauri/Cargo.toml
+   ```
+2. **Launch Application in Development**:
+   ```bash
+   pnpm tauri dev
+   ```
+3. **Test PIN Save Settings**:
+   * Navigate to the **Settings** view.
+   * Modify any option (e.g. toggle "Notifications" or "Keyboard Shortcuts").
+   * Click **Save Settings**.
+   * Verify that the **Authorize Settings Update** PIN modal overlays the screen.
+   * Attempt to cancel or enter an incorrect PIN; confirm changes are not saved and error toast displays.
+   * Enter today's PIN (in `ddmmyy` format) and confirm settings are successfully saved with a success toast.
+
+---
+
 # SILO Release Notes v1.0.0 (Official Release)
 
 Welcome to the **initial official release of SILO (v1.0.0)**! SILO is a local-first, privacy-focused productivity and digital wellness platform designed to help you monitor screen time, control distractions, and analyze internet usage in real-time.

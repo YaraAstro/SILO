@@ -409,15 +409,19 @@
                   <div class="flex items-center gap-3 min-w-0">
                     <IconBadge
                       icon={isApp ? Monitor : Globe}
+                      image={isApp && item.icon ? `data:image/bmp;base64,${item.icon}` : null}
                       tone={isApp ? "purple" : "teal"}
                       label={item.name}
                       size="md"
                     />
                     <div class="min-w-0">
-                      <span class="truncate font-bold text-sm text-slate-200 block" title={item.name}>
-                        {item.name}
+                      <span class="truncate font-bold text-sm text-slate-200 block" title={item.displayName || item.name}>
+                        {isApp ? (item.displayName || item.name) : item.name}
                       </span>
-                      <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                      {#if isApp && item.displayName && item.displayName !== item.name}
+                        <span class="text-[9px] text-slate-500 font-semibold block font-mono lowercase mt-0.5 leading-none">{item.name}</span>
+                      {/if}
+                      <span class="text-[10px] text-slate-500 font-semibold mt-1 block">
                         {percentage}% of range screen time
                       </span>
                     </div>
@@ -635,15 +639,19 @@
                   <div class="flex items-center gap-3 min-w-0">
                     <IconBadge
                       icon={statsNetworkTab === 'apps' ? Monitor : Globe}
+                      image={statsNetworkTab === 'apps' && row.icon ? `data:image/bmp;base64,${row.icon}` : null}
                       tone="purple"
                       label={row.name}
                       size="md"
                     />
                     <div class="min-w-0">
-                      <span class="truncate font-bold text-sm text-slate-200 block" title={row.name}>
-                        {row.name}
+                      <span class="truncate font-bold text-sm text-slate-200 block" title={row.displayName || row.name}>
+                        {statsNetworkTab === 'apps' ? (row.displayName || row.name) : row.name}
                       </span>
-                      <span class="text-[10px] text-slate-500 font-semibold mt-0.5 block">
+                      {#if statsNetworkTab === 'apps' && row.displayName && row.displayName !== row.name}
+                        <span class="text-[9px] text-slate-500 font-semibold block font-mono lowercase mt-0.5 leading-none">{row.name}</span>
+                      {/if}
+                      <span class="text-[10px] text-slate-500 font-semibold mt-1 block">
                         Down: {formatBytes(row.downloadBytes)} · Up: {formatBytes(row.uploadBytes)}
                       </span>
                     </div>

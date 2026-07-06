@@ -3590,9 +3590,10 @@ dependencies = [
 
 [[package]]
 name = "silo"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "dirs 6.0.0",
  "once_cell",

@@ -8,6 +8,7 @@ use api::{
     get_data_usage, get_network_history, get_network_speed, get_rule_stats, get_rules,
     get_settings, get_usage, get_usage_90d, get_usage_range, handshake, mark_backup_complete,
     save_rule, save_settings, start_focus_mode, stop_focus_mode, toggle_focus_mode,
+    get_presets, save_preset, delete_preset,
 };
 use models::AppReadyEvent;
 use monitor::{Monitor, NetworkMonitor};
@@ -481,11 +482,19 @@ fn check_and_enforce_rules(
         blocked_path.to_string_lossy().replace('\\', "/")
     );
     let rules = state.storage().rules()?;
+    let presets = state.storage().presets()?;
+    let active_presets: std::collections::HashSet<i64> = presets
+        .into_iter()
+        .filter(|p| p.active)
+        .filter_map(|p| p.id)
+        .collect();
+
     let mut rule_states = state.rule_states.lock();
     let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
     for rule in rules {
-        if !rule.active {
+        let is_preset_active = rule.preset_id.map(|pid| active_presets.contains(&pid)).unwrap_or(false);
+        if !rule.active || !is_preset_active {
             continue;
         }
 
@@ -1014,7 +1023,10 @@ pub fn run() {
             get_usage_range,
             get_rule_stats,
             close_overlay,
-            exit_app
+            exit_app,
+            get_presets,
+            save_preset,
+            delete_preset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

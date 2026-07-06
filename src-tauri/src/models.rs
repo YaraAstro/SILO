@@ -27,6 +27,14 @@ pub struct AppSnapshot {
     pub network_speed: NetworkSpeed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    pub name: String,
+    pub exe_name: String,
+    pub icon: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveApp {
@@ -37,6 +45,8 @@ pub struct ActiveApp {
     pub sampled_at: i64,
     pub site: Option<String>,
     pub is_fullscreen: bool,
+    pub app_display_name: Option<String>,
+    pub app_icon: Option<String>,
 }
 
 impl Default for ActiveApp {
@@ -49,6 +59,8 @@ impl Default for ActiveApp {
             sampled_at: 0,
             site: None,
             is_fullscreen: false,
+            app_display_name: Some("SILO".to_string()),
+            app_icon: None,
         }
     }
 }
@@ -86,6 +98,19 @@ pub struct Rule {
     #[serde(default)]
     pub extra_limit_seconds: i64,
     pub extra_limit_date: Option<String>,
+    pub preset_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preset {
+    pub id: Option<i64>,
+    pub name: String,
+    pub active: bool,
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +166,8 @@ pub struct UsageDay {
 pub struct UsageBucket {
     pub name: String,
     pub seconds: i64,
+    pub display_name: Option<String>,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +195,8 @@ pub struct DataConsumer {
     pub name: String,
     pub upload_bytes: i64,
     pub download_bytes: i64,
+    pub display_name: Option<String>,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

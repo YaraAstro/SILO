@@ -380,13 +380,23 @@
               <div class="flex items-start justify-between gap-3 mb-2">
                 <div class="flex items-center gap-3.5 min-w-0">
                   <!-- Icon placeholder / Fallback -->
-                  <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-800/40 text-slate-300 shrink-0 border border-slate-700/30">
-                     <Icon size={15} />
-                  </div>
+                  {#if label === "Apps" && row.icon}
+                    <img src="data:image/bmp;base64,{row.icon}" class="w-8 h-8 rounded-lg object-contain shrink-0 border border-slate-700/30 p-1" alt={row.displayName || row.name} />
+                  {:else}
+                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-800/40 text-slate-300 shrink-0 border border-slate-700/30">
+                       <Icon size={15} />
+                    </div>
+                  {/if}
                   <div class="min-w-0 mt-0.5">
-                    <p class="truncate text-[14px] font-bold text-slate-100 leading-tight">{row.name}</p>
-                    <p class="text-[10px] text-slate-500 font-medium tracking-wide mt-1">
-                      {label === "Apps" ? "Application" : "Network Domain"}
+                    <p class="truncate text-[14px] font-bold text-slate-100 leading-tight" title={row.displayName || row.name}>
+                      {label === "Apps" ? (row.displayName || row.name) : row.name}
+                    </p>
+                    <p class="text-[10px] text-slate-500 font-medium tracking-wide mt-1 flex items-center gap-1.5">
+                      {#if label === "Apps" && row.displayName && row.displayName !== row.name}
+                        <span class="font-mono lowercase text-[9px] bg-slate-900 px-1 py-0.2 rounded border border-slate-800 leading-none">{row.name}</span>
+                        <span class="leading-none">•</span>
+                      {/if}
+                      <span class="leading-none">{label === "Apps" ? "Application" : "Network Domain"}</span>
                     </p>
                   </div>
                 </div>

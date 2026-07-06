@@ -1,11 +1,13 @@
 <script lang="ts">
   let {
     icon: Icon,
+    image = null,
     tone = "teal",
     label = "",
     size = "md"
   }: {
     icon: any;
+    image?: string | null;
     tone?: "teal" | "purple" | "yellow" | "red" | "blue" | "neutral";
     label?: string;
     size?: "sm" | "md" | "lg";
@@ -34,5 +36,9 @@
 </script>
 
 <span class="inline-flex shrink-0 items-center justify-center rounded-lg {toneClass[tone]} {sizeClass[size]}" aria-label={label || undefined}>
-  <Icon size={iconSize[size]} strokeWidth={2.2} />
+  {#if image}
+    <img src={image} class="w-full h-full object-contain p-1.5 rounded-lg" alt={label} />
+  {:else}
+    <Icon size={iconSize[size]} strokeWidth={2.2} />
+  {/if}
 </span>

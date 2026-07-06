@@ -1,7 +1,7 @@
 use crate::{
     models::{
         AppSnapshot, BootStatus, DataUsageReport, ExportResult, NetworkSpeed, Rule, Settings,
-        UsageDayBytes,
+        UsageDayBytes, Preset,
     },
     AppState,
 };
@@ -92,6 +92,31 @@ pub fn delete_rule(app: AppHandle, state: State<'_, AppState>, id: i64) -> Comma
 #[tauri::command]
 pub fn add_rule_time(app: AppHandle, id: i64, seconds: i64) -> CommandResult<()> {
     crate::extend_rule_limit(&app, id, seconds)
+}
+
+#[tauri::command]
+pub fn get_presets(state: State<'_, AppState>) -> CommandResult<Vec<Preset>> {
+    state.storage().presets().map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn save_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset: Preset,
+) -> CommandResult<Preset> {
+    let saved = state.storage().save_preset(preset).map_err(to_command_error)?;
+    let _ = app.emit("presets_changed", &saved);
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn delete_preset(app: AppHandle, state: State<'_, AppState>, id: i64) -> CommandResult<()> {
+    state.storage().delete_preset(id).map_err(to_command_error)?;
+    let _ = app.emit("presets_changed", ());
+    // Cascade delete of rules might have happened, notify rules_changed
+    let _ = app.emit("rules_changed", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -191,26 +216,68 @@ pub fn mark_backup_complete(state: State<'_, AppState>) -> CommandResult<Setting
 }
 
 #[tauri::command]
-pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<String>> {
-    let mut apps = std::collections::HashSet::new();
+pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<crate::models::AppInfo>> {
+    use std::collections::HashMap;
 
-    if let Ok(tracked) = state.storage().get_tracked_apps() {
-        for app in tracked {
-            apps.insert(app);
-        }
-    }
+    let mut app_map = HashMap::new();
 
     let mut sys = sysinfo::System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
     for process in sys.processes().values() {
-        let name = process.name().to_string_lossy().to_string();
-        if !name.trim().is_empty() {
-            apps.insert(name);
+        let exe_name = process.name().to_string_lossy().to_string();
+        if exe_name.trim().is_empty() {
+            continue;
+        }
+
+        if !app_map.contains_key(&exe_name) {
+            let mut name = exe_name.clone();
+            let mut icon = None;
+
+            if let Some(exe_path) = process.exe() {
+                let (display, app_icon) = crate::monitor::get_app_info(exe_path);
+                name = display;
+                icon = app_icon;
+            } else {
+                if name.to_lowercase().ends_with(".exe") {
+                    name = name[..name.len() - 4].to_string();
+                }
+            }
+
+            app_map.insert(
+                exe_name.clone(),
+                crate::models::AppInfo {
+                    name,
+                    exe_name,
+                    icon,
+                },
+            );
         }
     }
 
-    let mut sorted_apps: Vec<String> = apps.into_iter().collect();
-    sorted_apps.sort_by_key(|a| a.to_lowercase());
+    if let Ok(tracked) = state.storage().get_tracked_apps() {
+        for exe_name in tracked {
+            if exe_name.trim().is_empty() {
+                continue;
+            }
+            if !app_map.contains_key(&exe_name) {
+                let mut name = exe_name.clone();
+                if name.to_lowercase().ends_with(".exe") {
+                    name = name[..name.len() - 4].to_string();
+                }
+                app_map.insert(
+                    exe_name.clone(),
+                    crate::models::AppInfo {
+                        name,
+                        exe_name,
+                        icon: None,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut sorted_apps: Vec<crate::models::AppInfo> = app_map.into_values().collect();
+    sorted_apps.sort_by_key(|a| a.name.to_lowercase());
     Ok(sorted_apps)
 }
 

@@ -3,6 +3,11 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use std::time::Instant;
 use sysinfo::{Networks, Pid, ProcessesToUpdate, System};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+
+pub static APP_INFO_CACHE: Lazy<Mutex<HashMap<String, (String, Option<String>)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub struct Monitor {
     inner: Mutex<MonitorState>,
@@ -46,6 +51,21 @@ impl Monitor {
 
                 let site = extract_browser_site(&app, &sample.title);
 
+                let mut app_display_name = Some(app.clone());
+                let mut app_icon = None;
+                if let Some(process) = inner.system.process(pid) {
+                    if let Some(exe_path) = process.exe() {
+                        let (display, icon) = platform::get_app_info(exe_path);
+                        app_display_name = Some(display);
+                        app_icon = icon;
+                    }
+                }
+                if let Some(ref name) = app_display_name {
+                    if name.to_lowercase().ends_with(".exe") {
+                        app_display_name = Some(name[..name.len() - 4].to_string());
+                    }
+                }
+
                 ActiveApp {
                     app,
                     title: sample.title,
@@ -54,6 +74,8 @@ impl Monitor {
                     sampled_at: Utc::now().timestamp(),
                     site,
                     is_fullscreen: sample.is_fullscreen,
+                    app_display_name,
+                    app_icon,
                 }
             }
             None => ActiveApp {
@@ -64,6 +86,8 @@ impl Monitor {
                 sampled_at: Utc::now().timestamp(),
                 site: None,
                 is_fullscreen: false,
+                app_display_name: Some("Unknown".to_string()),
+                app_icon: None,
             },
         };
 
@@ -165,7 +189,7 @@ struct ActiveWindowSample {
 mod platform {
     use super::ActiveWindowSample;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+        GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, HICON,
     };
 
     pub fn active_window() -> Option<ActiveWindowSample> {
@@ -238,6 +262,183 @@ mod platform {
             })
         }
     }
+
+    unsafe fn hicon_to_bmp_bytes(hicon: HICON) -> Option<Vec<u8>> {
+        use windows::Win32::Graphics::Gdi::{
+            CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, SelectObject,
+            BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, HGDIOBJ,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
+
+        let mut icon_info = ICONINFO::default();
+        if GetIconInfo(hicon, &mut icon_info).is_err() {
+            return None;
+        }
+
+        let hbm_color = icon_info.hbmColor;
+        let hbm_mask = icon_info.hbmMask;
+        
+        let result = (|| {
+            if hbm_color.is_invalid() {
+                return None;
+            }
+
+            let hdc = CreateCompatibleDC(None);
+            if hdc.is_invalid() {
+                return None;
+            }
+
+            let mut bmp = BITMAP::default();
+            let get_obj_res = GetObjectW(
+                HGDIOBJ(hbm_color.0),
+                std::mem::size_of::<BITMAP>() as i32,
+                Some(&mut bmp as *mut _ as *mut _),
+            );
+            if get_obj_res == 0 {
+                let _ = DeleteDC(hdc);
+                return None;
+            }
+
+            let width = bmp.bmWidth;
+            let height = bmp.bmHeight;
+            
+            let mut bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: width,
+                    biHeight: -height, // negative height for top-down DIB
+                    biPlanes: 1,
+                    biBitCount: 32, // 32-bit RGBA
+                    biCompression: 0, // BI_RGB
+                    biSizeImage: (width * height * 4) as u32,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let mut buffer = vec![0u8; (width * height * 4) as usize];
+            let old_obj = SelectObject(hdc, HGDIOBJ(hbm_color.0));
+            
+            let success = GetDIBits(
+                hdc,
+                hbm_color,
+                0,
+                height as u32,
+                Some(buffer.as_mut_ptr() as *mut _),
+                &mut bmi,
+                DIB_RGB_COLORS,
+            );
+
+            SelectObject(hdc, old_obj);
+            let _ = DeleteDC(hdc);
+
+            if success == 0 {
+                return None;
+            }
+
+            let file_header_size = 14;
+            let info_header_size = 40;
+            let total_size = file_header_size + info_header_size + buffer.len();
+
+            let mut bmp_file = Vec::with_capacity(total_size);
+            
+            // 1. File Header
+            bmp_file.extend_from_slice(b"BM");
+            bmp_file.extend_from_slice(&(total_size as u32).to_le_bytes());
+            bmp_file.extend_from_slice(&[0, 0, 0, 0]);
+            bmp_file.extend_from_slice(&((file_header_size + info_header_size) as u32).to_le_bytes());
+
+            // 2. Info Header
+            bmp_file.extend_from_slice(&(info_header_size as u32).to_le_bytes());
+            bmp_file.extend_from_slice(&width.to_le_bytes());
+            bmp_file.extend_from_slice(&(-height).to_le_bytes());
+            bmp_file.extend_from_slice(&1u16.to_le_bytes());
+            bmp_file.extend_from_slice(&32u16.to_le_bytes());
+            bmp_file.extend_from_slice(&0u32.to_le_bytes());
+            bmp_file.extend_from_slice(&(buffer.len() as u32).to_le_bytes());
+            bmp_file.extend_from_slice(&0i32.to_le_bytes());
+            bmp_file.extend_from_slice(&0i32.to_le_bytes());
+            bmp_file.extend_from_slice(&0u32.to_le_bytes());
+            bmp_file.extend_from_slice(&0u32.to_le_bytes());
+
+            // 3. Pixel data
+            bmp_file.extend_from_slice(&buffer);
+
+            Some(bmp_file)
+        })();
+
+        if !hbm_color.is_invalid() {
+            let _ = DeleteObject(HGDIOBJ(hbm_color.0));
+        }
+        if !hbm_mask.is_invalid() {
+            let _ = DeleteObject(HGDIOBJ(hbm_mask.0));
+        }
+
+        result
+    }
+
+    pub fn get_app_info(exe_path: &std::path::Path) -> (String, Option<String>) {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_DISPLAYNAME};
+        use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
+        use std::mem::size_of;
+        use std::os::windows::ffi::OsStrExt;
+
+        let exe_str = exe_path.to_string_lossy().to_string();
+        let cache_key = exe_str.clone();
+
+        if let Some(cached) = super::APP_INFO_CACHE.lock().get(&cache_key) {
+            return cached.clone();
+        }
+
+        let mut path_u16: Vec<u16> = exe_path.as_os_str().encode_wide().collect();
+        path_u16.push(0);
+
+        let mut shfi = SHFILEINFOW::default();
+        let result = unsafe {
+            SHGetFileInfoW(
+                PCWSTR(path_u16.as_ptr()),
+                Default::default(),
+                Some(&mut shfi as *mut _),
+                size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON | SHGFI_DISPLAYNAME,
+            )
+        };
+
+        let mut friendly_name = exe_path.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| exe_str.clone());
+
+        let mut base64_icon = None;
+
+        if result != 0 {
+            let len = shfi.szDisplayName.iter().position(|&c| c == 0).unwrap_or(shfi.szDisplayName.len());
+            if len > 0 {
+                let name = String::from_utf16_lossy(&shfi.szDisplayName[..len]);
+                if !name.trim().is_empty() {
+                    friendly_name = name;
+                }
+            }
+
+            if !shfi.hIcon.is_invalid() {
+                if let Some(bmp_bytes) = unsafe { hicon_to_bmp_bytes(shfi.hIcon) } {
+                    use base64::Engine;
+                    base64_icon = Some(base64::prelude::BASE64_STANDARD.encode(&bmp_bytes));
+                }
+                unsafe {
+                    let _ = DestroyIcon(shfi.hIcon);
+                }
+            }
+        }
+
+        if friendly_name.to_lowercase().ends_with(".exe") {
+            friendly_name = friendly_name[..friendly_name.len() - 4].to_string();
+        }
+
+        let info = (friendly_name, base64_icon);
+        super::APP_INFO_CACHE.lock().insert(cache_key, info.clone());
+        info
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -247,6 +448,54 @@ mod platform {
     pub fn active_window() -> Option<ActiveWindowSample> {
         None
     }
+
+    pub fn get_app_info(exe_path: &std::path::Path) -> (String, Option<String>) {
+        let name = exe_path.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let friendly_name = if name.to_lowercase().ends_with(".exe") {
+            name[..name.len() - 4].to_string()
+        } else {
+            name
+        };
+        (friendly_name, None)
+    }
+}
+
+pub fn resolve_app_info_from_name(name: &str) -> (String, Option<String>) {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    for process in sys.processes().values() {
+        let exe_name = process.name().to_string_lossy().to_string();
+        if exe_name.eq_ignore_ascii_case(name) {
+            if let Some(exe_path) = process.exe() {
+                return platform::get_app_info(exe_path);
+            }
+        }
+    }
+
+    // Try looking up in the cache by the executable name as a suffix
+    {
+        let cache = APP_INFO_CACHE.lock();
+        for (path, (friendly, icon)) in cache.iter() {
+            let path_lower = path.to_lowercase();
+            let name_lower = name.to_lowercase();
+            if path_lower == name_lower 
+                || path_lower.ends_with(&format!("\\{}", name_lower)) 
+                || path_lower.ends_with(&format!("/{}", name_lower)) 
+            {
+                return (friendly.clone(), icon.clone());
+            }
+        }
+    }
+
+    // Fallback: strip .exe and return no icon
+    let friendly = if name.to_lowercase().ends_with(".exe") {
+        name[..name.len() - 4].to_string()
+    } else {
+        name.to_string()
+    };
+    (friendly, None)
 }
 
 pub fn normalize_domain(input: &str) -> String {
@@ -357,4 +606,8 @@ pub fn extract_browser_site(app_name: &str, window_title: &str) -> Option<String
     }
 
     Some(normalize_domain(&site_name))
+}
+
+pub fn get_app_info(exe_path: &std::path::Path) -> (String, Option<String>) {
+    platform::get_app_info(exe_path)
 }
