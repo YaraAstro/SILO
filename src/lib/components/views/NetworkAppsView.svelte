@@ -168,12 +168,25 @@
             <div class="flex flex-col sm:grid sm:grid-cols-[1.5fr_1fr_1fr_1fr] items-start sm:items-center justify-between gap-2.5">
               <div class="flex items-center gap-3 min-w-0 w-full">
                 <!-- Rank badge -->
-                <span class="text-xs font-black px-2 py-1 bg-slate-800 text-slate-400 group-hover:bg-teal-400 group-hover:text-slate-950 rounded-md transition-colors min-w-[28px] text-center">
+                <span class="text-xs font-black px-2 py-1 bg-slate-800 text-slate-400 group-hover:bg-teal-400 group-hover:text-slate-950 rounded-md transition-colors min-w-[28px] text-center font-mono">
                   #{rankIndex}
                 </span>
-                <p class="truncate font-black text-slate-200 group-hover:text-teal-300 transition-colors">
-                  {row.name}
-                </p>
+                
+                <!-- App icon -->
+                {#if row.icon}
+                  <img src="data:image/bmp;base64,{row.icon}" class="w-6 h-6 object-contain rounded shrink-0" alt={row.displayName || row.name} />
+                {:else}
+                  <div class="w-6 h-6 flex items-center justify-center bg-slate-800 rounded text-[9px] text-slate-500 font-bold shrink-0">EXE</div>
+                {/if}
+
+                <div class="flex flex-col min-w-0">
+                  <p class="truncate font-black text-slate-200 group-hover:text-teal-300 transition-colors leading-tight">
+                    {row.displayName || row.name}
+                  </p>
+                  {#if row.displayName && row.displayName !== row.name}
+                    <span class="text-[9px] text-slate-500 font-semibold truncate lowercase font-mono mt-0.5 leading-none">{row.name}</span>
+                  {/if}
+                </div>
               </div>
 
               <!-- Down bytes -->

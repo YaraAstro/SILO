@@ -41,6 +41,12 @@ export type BootStatus = {
   settings: Settings;
 };
 
+export type AppInfo = {
+  name: string;
+  exeName: string;
+  icon: string | null;
+};
+
 export type AppSnapshot = {
   focusMode: boolean;
   activeApp: {
@@ -50,6 +56,8 @@ export type AppSnapshot = {
     pid: number | null;
     sampledAt: number;
     site?: string;
+    appDisplayName?: string | null;
+    appIcon?: string | null;
   };
   todaySeconds: number;
   rulesSummary: {
@@ -69,8 +77,8 @@ export type NetworkSpeed = {
 export type UsageReport = {
   date: string;
   totalSeconds: number;
-  apps: Array<{ name: string; seconds: number }>;
-  sites?: Array<{ name: string; seconds: number }>;
+  apps: Array<{ name: string; seconds: number; displayName?: string | null; icon?: string | null }>;
+  sites?: Array<{ name: string; seconds: number; displayName?: string | null; icon?: string | null }>;
 };
 
 export type UsageTimeline = {
@@ -89,6 +97,8 @@ export type DataConsumer = {
   name: string;
   uploadBytes: number;
   downloadBytes: number;
+  displayName?: string | null;
+  icon?: string | null;
 };
 
 export type ExportResult = {
@@ -145,7 +155,7 @@ export const siloApi = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   markBackupComplete: () => invoke<Settings>("mark_backup_complete"),
-  getAvailableApps: () => invoke<string[]>("get_available_apps"),
+  getAvailableApps: () => invoke<AppInfo[]>("get_available_apps"),
   getNetworkHistory: (range: string) => invoke<UsageDayBytes[]>("get_network_history", { range }),
   addRuleTime: (id: number, seconds: number) => invoke<void>("add_rule_time", { id, seconds }),
   getRuleStats: (range: string) => invoke<RuleStats[]>("get_rule_stats", { range }),

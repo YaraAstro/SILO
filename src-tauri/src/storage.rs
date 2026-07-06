@@ -354,9 +354,13 @@ impl Storage {
              ORDER BY SUM(duration_seconds) DESC",
         )?;
         let rows = statement.query_map(params![day_start, day_end], |row| {
+            let name: String = row.get(0)?;
+            let (friendly, app_icon) = crate::monitor::resolve_app_info_from_name(&name);
             Ok(UsageBucket {
-                name: row.get(0)?,
+                name,
                 seconds: row.get(1)?,
+                display_name: Some(friendly),
+                icon: app_icon,
             })
         })?;
         let apps = rows.collect::<Result<Vec<_>, _>>()?;
@@ -373,6 +377,8 @@ impl Storage {
             Ok(UsageBucket {
                 name: row.get(0)?,
                 seconds: row.get(1)?,
+                display_name: None,
+                icon: None,
             })
         })?;
         let sites = site_rows.collect::<Result<Vec<_>, _>>()?;
@@ -410,9 +416,13 @@ impl Storage {
              ORDER BY SUM(duration_seconds) DESC",
         )?;
         let rows = statement.query_map(params![start_ts], |row| {
+            let name: String = row.get(0)?;
+            let (friendly, app_icon) = crate::monitor::resolve_app_info_from_name(&name);
             Ok(UsageBucket {
-                name: row.get(0)?,
+                name,
                 seconds: row.get(1)?,
+                display_name: Some(friendly),
+                icon: app_icon,
             })
         })?;
         let apps = rows.collect::<Result<Vec<_>, _>>()?;
@@ -429,6 +439,8 @@ impl Storage {
             Ok(UsageBucket {
                 name: row.get(0)?,
                 seconds: row.get(1)?,
+                display_name: None,
+                icon: None,
             })
         })?;
         let sites = site_rows.collect::<Result<Vec<_>, _>>()?;
@@ -912,11 +924,22 @@ fn data_consumers(
          LIMIT 25"
     );
     let mut statement = conn.prepare(&sql)?;
-    let rows = statement.query_map(params![start], |row| {
+    let is_app_table = table == "app_data_usage";
+    let rows = statement.query_map(params![start], move |row| {
+        let name: String = row.get(0)?;
+        let mut display_name = None;
+        let mut icon = None;
+        if is_app_table {
+            let (friendly, app_icon) = crate::monitor::resolve_app_info_from_name(&name);
+            display_name = Some(friendly);
+            icon = app_icon;
+        }
         Ok(DataConsumer {
-            name: row.get(0)?,
+            name,
             upload_bytes: row.get(1)?,
             download_bytes: row.get(2)?,
+            display_name,
+            icon,
         })
     })?;
 

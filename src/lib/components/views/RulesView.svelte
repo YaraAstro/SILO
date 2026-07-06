@@ -20,7 +20,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cleanDomain } from "$lib/utils/cleanDomain";
   import { siloApi, emptyRule } from "$lib/siloApi";
-    import type { Rule, AppSnapshot, Settings, UsageReport, Preset } from "$lib/siloApi";
+    import type { Rule, AppSnapshot, Settings, UsageReport, Preset, AppInfo } from "$lib/siloApi";
   import { FolderPlus, Folder, FolderHeart, Edit, Check, X } from "lucide-svelte";
 
   let {
@@ -52,7 +52,7 @@
   let savingRule = $state(false);
   let showAppDropdown = $state(false);
   let showSiteDropdown = $state(false);
-  let availableApps = $state<string[]>([]);
+  let availableApps = $state<AppInfo[]>([]);
 
   // Presets local state
   let selectedPreset = $state<Preset | null>(null);
@@ -77,6 +77,7 @@
     clockTimer = setInterval(() => {
       lockTime = new Date();
     }, 1000);
+    loadAvailableApps();
   });
   onDestroy(() => {
     if (clockTimer) clearInterval(clockTimer);
@@ -172,7 +173,10 @@
   function filteredAvailableApps() {
     const query = ruleDraft.target.trim().toLowerCase();
     if (!query) return availableApps;
-    return availableApps.filter((app) => app.toLowerCase().includes(query));
+    return availableApps.filter((app) => 
+      app.name.toLowerCase().includes(query) || 
+      app.exeName.toLowerCase().includes(query)
+    );
   }
 
   function filteredAvailableSites() {
@@ -679,14 +683,22 @@
                     {#each filteredAvailableApps() as app}
                       <button
                         type="button"
-                        class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors"
+                        class="w-full px-3 py-2 text-left text-sm hover:bg-teal-500/20 hover:text-teal-300 transition-colors flex items-center gap-3"
                         onmousedown={(e) => {
                           e.preventDefault();
-                          ruleDraft.target = app;
+                          ruleDraft.target = app.exeName;
                           showAppDropdown = false;
                         }}
                       >
-                        {app}
+                        {#if app.icon}
+                          <img src="data:image/bmp;base64,{app.icon}" class="w-5 h-5 object-contain rounded shrink-0" alt={app.name} />
+                        {:else}
+                          <div class="w-5 h-5 flex items-center justify-center bg-slate-800 rounded text-[9px] text-slate-500 font-bold shrink-0">EXE</div>
+                        {/if}
+                        <div class="flex flex-col min-w-0">
+                          <span class="font-bold text-slate-200 truncate leading-tight">{app.name}</span>
+                          <span class="text-[10px] text-slate-500 font-semibold truncate mt-0.5 leading-none">{app.exeName}</span>
+                        </div>
                       </button>
                     {/each}
                   </div>
@@ -804,6 +816,7 @@
     <section class="space-y-4">
       {#if filteredRules().length}
         {#each filteredRules() as rule (rule.id ?? rule.target)}
+          {@const appInfo = rule.ruleType === "app" ? availableApps.find(a => a.exeName.toLowerCase() === rule.target.toLowerCase()) : null}
           <article 
             class="silo-card p-6 flex flex-col gap-4 border border-slate-800 hover:border-slate-700 bg-slate-900/40 hover:bg-slate-900/60 transition-all duration-300 relative group overflow-hidden"
             transition:slide={{ duration: 200 }}
@@ -818,17 +831,21 @@
               <div class="flex items-center gap-4 min-w-0">
                 <IconBadge
                   icon={rule.ruleType === "site" ? Globe : Monitor}
+                  image={appInfo?.icon ? `data:image/bmp;base64,${appInfo.icon}` : null}
                   tone={rule.ruleType === "site" ? "teal" : "purple"}
                   label={rule.ruleType}
                   size="lg"
                 />
                 <div class="min-w-0">
                   <h2 class="truncate text-xl font-black text-slate-100 flex items-center gap-2.5">
-                    {rule.target}
+                    {appInfo ? appInfo.name : rule.target}
                     <span class="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full border border-slate-800 bg-slate-950 text-slate-400">
                       {rule.ruleType}
                     </span>
                   </h2>
+                  {#if appInfo && appInfo.name.toLowerCase() !== appInfo.exeName.toLowerCase()}
+                    <p class="text-[10px] text-slate-500 font-semibold mt-0.5 leading-none">{rule.target}</p>
+                  {/if}
                   
                   <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400 font-semibold">
                     <span class="flex items-center gap-1.5">

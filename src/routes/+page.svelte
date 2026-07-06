@@ -704,7 +704,7 @@ import { open } from "@tauri-apps/plugin-dialog";
           }}
           {exporting}
           bind:dataRange
-          loadDataUsage={async (range) => {
+          loadDataUsage={async (range: "today" | "7d" | "30d" | "90d") => {
             dataRange = range;
             dataUsage = await siloApi.getDataUsage(range);
           }}

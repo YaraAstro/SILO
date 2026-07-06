@@ -216,26 +216,68 @@ pub fn mark_backup_complete(state: State<'_, AppState>) -> CommandResult<Setting
 }
 
 #[tauri::command]
-pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<String>> {
-    let mut apps = std::collections::HashSet::new();
+pub fn get_available_apps(state: State<'_, AppState>) -> CommandResult<Vec<crate::models::AppInfo>> {
+    use std::collections::HashMap;
 
-    if let Ok(tracked) = state.storage().get_tracked_apps() {
-        for app in tracked {
-            apps.insert(app);
-        }
-    }
+    let mut app_map = HashMap::new();
 
     let mut sys = sysinfo::System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
     for process in sys.processes().values() {
-        let name = process.name().to_string_lossy().to_string();
-        if !name.trim().is_empty() {
-            apps.insert(name);
+        let exe_name = process.name().to_string_lossy().to_string();
+        if exe_name.trim().is_empty() {
+            continue;
+        }
+
+        if !app_map.contains_key(&exe_name) {
+            let mut name = exe_name.clone();
+            let mut icon = None;
+
+            if let Some(exe_path) = process.exe() {
+                let (display, app_icon) = crate::monitor::get_app_info(exe_path);
+                name = display;
+                icon = app_icon;
+            } else {
+                if name.to_lowercase().ends_with(".exe") {
+                    name = name[..name.len() - 4].to_string();
+                }
+            }
+
+            app_map.insert(
+                exe_name.clone(),
+                crate::models::AppInfo {
+                    name,
+                    exe_name,
+                    icon,
+                },
+            );
         }
     }
 
-    let mut sorted_apps: Vec<String> = apps.into_iter().collect();
-    sorted_apps.sort_by_key(|a| a.to_lowercase());
+    if let Ok(tracked) = state.storage().get_tracked_apps() {
+        for exe_name in tracked {
+            if exe_name.trim().is_empty() {
+                continue;
+            }
+            if !app_map.contains_key(&exe_name) {
+                let mut name = exe_name.clone();
+                if name.to_lowercase().ends_with(".exe") {
+                    name = name[..name.len() - 4].to_string();
+                }
+                app_map.insert(
+                    exe_name.clone(),
+                    crate::models::AppInfo {
+                        name,
+                        exe_name,
+                        icon: None,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut sorted_apps: Vec<crate::models::AppInfo> = app_map.into_values().collect();
+    sorted_apps.sort_by_key(|a| a.name.to_lowercase());
     Ok(sorted_apps)
 }
 

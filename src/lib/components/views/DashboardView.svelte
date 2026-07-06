@@ -440,6 +440,7 @@
         <div class="flex items-center justify-between">
           <IconBadge
             icon={snapshot?.activeApp?.site ? Globe : Monitor}
+            image={(!snapshot?.activeApp?.site && snapshot?.activeApp?.appIcon) ? `data:image/bmp;base64,${snapshot.activeApp.appIcon}` : null}
             tone={snapshot?.activeApp?.site ? "teal" : "purple"}
             label="Active application"
           />
@@ -456,14 +457,18 @@
             {snapshot?.activeApp?.site}
           </p>
           <p class="mt-1 truncate text-xs text-slate-500 font-semibold uppercase tracking-wider">
-            via {snapshot?.activeApp?.app}
+            via {snapshot?.activeApp?.appDisplayName || snapshot?.activeApp?.app}
           </p>
         {:else}
-          <p class="mt-6 truncate text-2xl font-black text-slate-100 group-hover:text-purple-300 transition-colors" title={snapshot?.activeApp?.app || "No active app"}>
-            {snapshot?.activeApp?.app || "No active app"}
+          <p class="mt-6 truncate text-2xl font-black text-slate-100 group-hover:text-purple-300 transition-colors" title={snapshot?.activeApp?.appDisplayName || snapshot?.activeApp?.app || "No active app"}>
+            {snapshot?.activeApp?.appDisplayName || snapshot?.activeApp?.app || "No active app"}
           </p>
-          <p class="mt-1 truncate text-xs text-slate-500 font-semibold uppercase tracking-wider">
-            {snapshot?.activeApp?.title || "Current window"}
+          <p class="mt-1 truncate text-xs text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+            {#if snapshot?.activeApp?.appDisplayName && snapshot?.activeApp?.appDisplayName !== snapshot?.activeApp?.app}
+              <span class="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800/80 font-mono text-[9px] tracking-normal text-slate-400 lowercase">{snapshot?.activeApp?.app}</span>
+              <span class="text-slate-600">•</span>
+            {/if}
+            <span>{snapshot?.activeApp?.title || "Current window"}</span>
           </p>
         {/if}
       </div>
