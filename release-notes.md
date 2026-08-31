@@ -1,3 +1,24 @@
+# SILO Release Notes v1.1.2 (Window Resizing & Real-Time Network Monitor)
+
+Welcome to **SILO v1.1.2**! This release fixes window resizing/expansion freezes and delivers a silky-smooth, real-time live network monitor with industry-standard Mbps & Kbps metrics.
+
+---
+
+## 🚀 Key Highlights
+
+### 1. Window Expansion & Resizing Freeze Fix
+* **Eliminated Layout Thrashing**: Resolved an issue where expanding or resizing the application window caused Chart.js to enter an infinite resize observation loop within flex/grid layouts.
+* **Bounded Containers & Debounced Redraws**: Chart canvases are now safely contained with `overflow: hidden`, and dataset updates happen in-place using `chart.update('none')` with a 60ms debounce.
+
+### 2. Smooth 1-Second Real-Time Network Stream with EMA
+* **Real-time Event Streaming**: The monitoring engine now streams live network transfer rates to the frontend every 1 second over Tauri IPC (`network_speed_update`).
+* **Exponential Moving Average (EMA)**: Implemented an EMA smoothing algorithm to filter out bursty UDP/TCP packet jitter, providing a smooth real-time bandwidth graph.
+
+### 3. Standard Mbps & Kbps Bandwidth Formatting
+* **Industry Standard Units**: Network rates are now converted and formatted into standard bits-per-second units (**Mbps**, **Kbps**, **Gbps**) matching Ookla Speedtest and network monitoring tools, while total cumulative volume remains in **GB / MB / KB**.
+
+---
+
 # SILO Release Notes v1.1.1 (Windows Startup & Background Execution Refactor)
 
 Welcome to **SILO v1.1.1**! This release introduces a refactored Windows startup and window lifecycle architecture, ensuring completely headless background execution during Windows boot, on-demand GUI instantiation, single-instance communication, and responsive window handling.
