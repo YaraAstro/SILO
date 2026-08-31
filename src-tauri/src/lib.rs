@@ -256,15 +256,15 @@ fn show_native_toast(
 
     let actions_xml = if enforcement == "warn" {
         format!(
-            r#"<actions>
-              <action content="+15 Min" arguments="silo://add-time/{}/{}" activationType="protocol"/>
-              <action content="+30 Min" arguments="silo://add-time/{}/{}" activationType="protocol"/>
-              <action content="+1 Hour" arguments="silo://add-time/{}/{}" activationType="protocol"/>
-            </actions>"#,
-            rule_id, 900, rule_id, 1800, rule_id, 3600
+            "<actions>\
+              <action content=\"+15 Min\" arguments=\"silo://add-time/{}/900\" activationType=\"protocol\"/>\
+              <action content=\"+30 Min\" arguments=\"silo://add-time/{}/1800\" activationType=\"protocol\"/>\
+              <action content=\"+1 Hour\" arguments=\"silo://add-time/{}/3600\" activationType=\"protocol\"/>\
+            </actions>",
+            rule_id, rule_id, rule_id
         )
     } else {
-        "".to_string()
+        String::new()
     };
 
     let audio_xml = if remaining_seconds > 0 && remaining_seconds < 60 {
@@ -274,16 +274,16 @@ fn show_native_toast(
     };
 
     let xml_str = format!(
-        r#"<toast>
-          <visual>
-            <binding template="ToastGeneric">
-              <text>{}</text>
-              <text>{}</text>
-            </binding>
-          </visual>
-          {}
-          {}
-        </toast>"#,
+        "<toast>\
+          <visual>\
+            <binding template=\"ToastGeneric\">\
+              <text>{}</text>\
+              <text>{}</text>\
+            </binding>\
+          </visual>\
+          {}\
+          {}\
+        </toast>",
         title, body, actions_xml, audio_xml
     );
 
@@ -317,53 +317,40 @@ fn trigger_native_toast(
         return;
     }
 
-    let title = match enforcement {
-        "hard" => {
-            if remaining_seconds <= 0 {
-                "Focus Block: Closed".to_string()
-            } else {
-                format!("Hard Block in {}s", remaining_seconds)
-            }
+    let title = if enforcement == "hard" {
+        if remaining_seconds <= 0 {
+            "Focus Block: Closed".to_string()
+        } else {
+            format!("Hard Block in {}s", remaining_seconds)
         }
-        _ => {
-            if remaining_seconds <= 0 {
-                "Limit Reached".to_string()
-            } else {
-                let minutes = remaining_seconds / 60;
-                if minutes > 0 {
-                    format!("Remaining: {}m", minutes)
-                } else {
-                    format!("Remaining: {}s", remaining_seconds)
-                }
-            }
+    } else if remaining_seconds <= 0 {
+        "Limit Reached".to_string()
+    } else {
+        let minutes = remaining_seconds / 60;
+        if minutes > 0 {
+            format!("Remaining: {}m", minutes)
+        } else {
+            format!("Remaining: {}s", remaining_seconds)
         }
     };
 
     let body = match enforcement {
+        "hard" if remaining_seconds <= 0 => {
+            format!("Time limit exceeded. {} has been closed.", target)
+        }
         "hard" => {
-            if remaining_seconds <= 0 {
-                format!("Time limit exceeded. {} has been closed.", target)
-            } else {
-                format!("Save your work immediately! {} is closing.", target)
-            }
+            format!("Save your work immediately! {} is closing.", target)
+        }
+        "warn" if remaining_seconds <= 0 => {
+            format!("Limit reached! Closed {}. Extend to keep using.", target)
         }
         "warn" => {
-            if remaining_seconds <= 0 {
-                format!("Limit reached! Closed {}. Extend to keep using.", target)
-            } else {
-                format!(
-                    "Warning: Focus limit is approaching for {}. Extend time to keep active.",
-                    target
-                )
-            }
+            format!("Warning: Focus limit is approaching for {}. Extend time to keep active.", target)
         }
         "soft" => {
-            format!(
-                "Time limit reached today. {} minimized to help you stay focused.",
-                target
-            )
+            format!("Time limit reached today. {} minimized to help you stay focused.", target)
         }
-        _ => "".to_string(),
+        _ => String::new(),
     };
 
     // Show overlay in all warning/block cases when limit is < 60s or 0

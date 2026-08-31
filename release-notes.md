@@ -1,3 +1,56 @@
+# SILO Release Notes v1.1.1 (Windows Startup & Background Execution Refactor)
+
+Welcome to **SILO v1.1.1**! This release introduces a refactored Windows startup and window lifecycle architecture, ensuring completely headless background execution during Windows boot, on-demand GUI instantiation, single-instance communication, and responsive window handling.
+
+---
+
+## 🚀 Key Highlights
+
+### 1. Headless Background Startup on Windows Boot
+* **Zero UI at Boot**: When Windows boots or when started with background flags (`--minimized`, `--background`, `--autostart`, `--silent`, `-b`), SILO runs entirely in the background without creating a visible window, splash screen, or initializing the Edge WebView2 runtime.
+* **Minimal Startup Footprint**: Core background tasks (active app tracking, network speed monitoring, SQLite database, and system tray management) initialize in microseconds with zero CPU overhead and negligible memory usage.
+
+### 2. On-Demand GUI Loading & Single-Instance IPC
+* **Dynamic Window Creation**: The main WebView window and dashboard UI are created only when explicitly requested by the user.
+* **Single-Instance Re-use**: Manually launching SILO from a desktop shortcut or Start menu while the background instance is active detects the running process via IPC, forwards CLI arguments, and immediately reveals the GUI without spawning duplicate processes.
+* **Instant Window Restoration**: Closing the window hides it smoothly to keep background monitoring active, and subsequent reopenings from the shortcut or system tray are instantaneous.
+
+### 3. Responsive Closing & Clean Termination
+* **Eliminated "Not Responding" Dialogs**: Separating heavy frontend and SQLite initialization from startup eliminates window message pump starvation when users close the window during initial launch.
+* **Clean Process Exit**: Selecting "Quit" from the tray menu or PIN modal terminates the background process completely.
+
+---
+
+## 🛠️ Code Changes & Affected Files
+
+| Component | File Path | Description |
+| :--- | :--- | :--- |
+| **Workspace Manifest** | [`package.json`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/package.json) | Bumped version to `1.1.1`. |
+| **Backend Manifest** | [`Cargo.toml`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/Cargo.toml) | Bumped package version to `1.1.1`. |
+| **Tauri Core Configuration** | [`tauri.conf.json`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/tauri.conf.json) | Bumped configuration build version to `1.1.1` and removed static window creation (`"windows": []`). |
+| **Rust Core & Lifecycle** | [`src-tauri/src/lib.rs`](file:///d:/Devs/project_silo/attempt_VI/silo/silo/src-tauri/src/lib.rs) | Implemented `show_or_create_main_window`, CLI background flag detection, on-demand single-instance/tray callbacks, and clean toast string formatting. |
+
+---
+
+## 📝 How to Verify the Release
+
+1. **Verify Backend Build and Manifest Sync**:
+   ```bash
+   cargo check --manifest-path src-tauri/Cargo.toml
+   ```
+2. **Build Static Frontend Assets**:
+   ```bash
+   pnpm build
+   ```
+3. **Test Headless Startup & GUI on Demand**:
+   * Run `cargo run --manifest-path src-tauri/Cargo.toml -- --minimized` (or launch via autostart).
+   * Confirm process runs quietly in background with tray icon and NO visible window.
+   * Double-click application shortcut or click tray icon to verify GUI opens promptly.
+   * Close window and verify process remains alive in tray.
+   * Click "Quit" from tray menu and confirm process terminates completely.
+
+---
+
 # SILO Release Notes v1.1.0 (PIN-Authorized Settings Protection)
 
 Welcome to **SILO v1.1.0**! This release introduces critical settings security, requiring PIN authorization before modifying configurations.
