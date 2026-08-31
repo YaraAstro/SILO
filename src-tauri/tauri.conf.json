@@ -10,7 +10,17 @@
     "frontendDist": "../build"
   },
   "app": {
-    "windows": [],
+    "windows": [
+      {
+        "label": "main",
+        "title": "SILO",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 960,
+        "minHeight": 640,
+        "visible": false
+      }
+    ],
     "security": {
       "csp": null
     }
