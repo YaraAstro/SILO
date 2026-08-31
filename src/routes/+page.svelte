@@ -663,7 +663,7 @@ import { open } from "@tauri-apps/plugin-dialog";
   ontouchend={handleTouchEnd}
   onwheel={handleWheel}
 >
-  <div class="mx-auto min-h-screen w-full max-w-7xl px-4 pb-28 pt-8 sm:px-6 lg:px-8">
+  <div class="mx-auto min-h-screen w-full max-w-7xl px-4 pb-28 pt-5 sm:px-6 sm:pt-7 lg:px-8">
     {#if loading}
       <section class="flex min-h-[70vh] items-center justify-center">
         <div class="text-center">
@@ -677,6 +677,21 @@ import { open } from "@tauri-apps/plugin-dialog";
         </div>
       </section>
     {:else}
+      <div class="silo-page-header">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-400/20 bg-teal-400/10 text-teal-300">
+            <Database size={19} />
+          </div>
+          <div>
+            <p class="text-sm font-black tracking-[0.24em] text-slate-100">SILO</p>
+            <p class="text-xs text-slate-500">Your quiet space for focused work</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+          <span class="h-2 w-2 rounded-full {snapshot ? 'bg-emerald-400' : 'bg-amber-400'}"></span>
+          {snapshot ? 'Monitoring active' : 'Connecting'}
+        </div>
+      </div>
       <!-- Render views based on activeView -->
       {#if activeView === "dashboard"}
         <DashboardView

@@ -6,14 +6,25 @@
 
 :root {
   color-scheme: dark;
+  --silo-bg: #080b10;
+  --silo-surface: #10161f;
+  --silo-surface-raised: #151d28;
+  --silo-border: rgba(148, 163, 184, 0.14);
+  --silo-border-strong: rgba(148, 163, 184, 0.24);
+  --silo-text: #f4f7fb;
+  --silo-muted: #8d9aab;
+  --silo-teal: #45e0c0;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 html {
-  background: #090d11;
+  background: var(--silo-bg);
 }
 
 body {
-  @apply bg-[#090d11] text-slate-100 antialiased;
+  @apply text-slate-100 antialiased;
+  background: var(--silo-bg);
   min-width: 320px;
 }
 
@@ -56,34 +67,55 @@ button:disabled {
 
 .bg-silo {
   background:
-    radial-gradient(circle at 50% -20%, rgba(20, 184, 166, 0.1), transparent 34rem),
-    #090d11;
+    radial-gradient(circle at 50% -18%, rgba(45, 212, 191, 0.08), transparent 32rem),
+    linear-gradient(180deg, #0a0f15 0%, var(--silo-bg) 38rem);
 }
 
 .silo-card {
-  @apply rounded-xl border border-slate-800 bg-slate-900/80 shadow-sm shadow-black/20;
+  @apply rounded-2xl border bg-slate-900/80 shadow-sm shadow-black/20;
+  border-color: var(--silo-border);
+  background: linear-gradient(145deg, rgba(21, 29, 40, 0.92), rgba(13, 18, 26, 0.92));
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.16);
 }
 
 .silo-button,
 .silo-button-secondary,
 .silo-icon-button {
-  @apply inline-flex min-h-10 items-center gap-2 rounded-lg text-sm font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-teal-300 disabled:opacity-55;
+  @apply inline-flex min-h-11 items-center gap-2 rounded-xl text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-teal-300 disabled:opacity-55;
+  transition: transform 160ms var(--ease-out), background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  touch-action: manipulation;
 }
 
 .silo-button {
-  @apply bg-teal-400 px-5 text-slate-950 hover:bg-teal-300;
+  @apply bg-teal-300 px-5 text-slate-950 hover:bg-teal-200;
+  box-shadow: 0 8px 24px rgba(45, 212, 191, 0.16);
 }
 
 .silo-button-secondary {
-  @apply border border-slate-700 bg-slate-800 px-4 text-slate-200 hover:bg-slate-700;
+  @apply border bg-slate-800/80 px-4 text-slate-200 hover:bg-slate-700;
+  border-color: var(--silo-border-strong);
 }
 
 .silo-icon-button {
-  @apply min-h-10 w-10 justify-center border border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100;
+  @apply min-h-11 w-11 justify-center border border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100;
+}
+
+.silo-button:active,
+.silo-button-secondary:active,
+.silo-icon-button:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .silo-card:hover {
+    border-color: var(--silo-border-strong);
+  }
 }
 
 .silo-input {
-  @apply min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-teal-400 focus:ring-2 focus:ring-teal-400/20;
+  @apply min-h-11 w-full rounded-xl border bg-slate-950/70 px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-teal-400 focus:ring-2 focus:ring-teal-400/20;
+  border-color: var(--silo-border-strong);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .silo-input option {
@@ -117,7 +149,7 @@ button:disabled {
 }
 
 .animate-pulse-glow {
-  animation: pulse-glow 4s ease-in-out infinite;
+  animation: pulse-glow 6s ease-in-out infinite;
 }
 
 @keyframes radar-pulse {
@@ -137,4 +169,31 @@ button:disabled {
 
 .animate-radar {
   animation: radar-pulse 2s infinite;
+}
+
+.silo-page-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--silo-border);
+}
+
+@media (max-width: 640px) {
+  .silo-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.2s !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.2s !important;
+  }
 }

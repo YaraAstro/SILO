@@ -330,9 +330,9 @@
   }
 </script>
 
-<section class="space-y-6" transition:fade={{ duration: 150 }}>
+<section class="space-y-7" transition:fade={{ duration: 150 }}>
   <!-- Premium Header Area -->
-  <header class="relative overflow-hidden rounded-3xl border transition-all duration-500 backdrop-blur-md p-8 shadow-2xl
+  <header class="relative overflow-hidden rounded-3xl border transition-colors duration-300 backdrop-blur-md p-6 sm:p-8 shadow-2xl
     {snapshot?.focusMode 
       ? 'border-red-500/15 bg-slate-950/60 shadow-red-950/5' 
       : 'border-slate-800/80 bg-slate-950/45 shadow-black/35'}">
@@ -343,10 +343,10 @@
       {snapshot?.focusMode ? 'bg-rose-500/5' : 'bg-purple-500/10'}"></div>
     
     <!-- Branding + Time Row -->
-    <div class="flex flex-col sm:flex-row items-center sm:justify-between gap-4 border-b border-slate-800/40 pb-6 mb-6">
+    <div class="flex flex-col sm:flex-row items-center sm:justify-between gap-4 border-b border-slate-800/40 pb-5 mb-5">
       <div class="text-center sm:text-left">
         <p class="text-[10px] font-black text-teal-400 uppercase tracking-widest mb-1.5">{currentDateStr}</p>
-        <h1 class="text-3xl font-black text-slate-100 flex items-center justify-center sm:justify-start gap-2">
+        <h1 class="text-2xl sm:text-3xl font-black text-slate-100 flex items-center justify-center sm:justify-start gap-2">
           <span>{greetingText}</span>
         </h1>
       </div>
@@ -363,17 +363,17 @@
         : "Shield is currently offline. Your limits and blocks are paused."}
     </p>
     
-    <div class="mt-6 flex justify-center">
+    <div class="mt-7 flex justify-center sm:justify-start">
       <div class="relative">
         {#if snapshot?.focusMode}
           <!-- Glowing ring behind button -->
           <div class="absolute -inset-1 rounded-2xl bg-gradient-to-r from-red-500 to-rose-600 opacity-30 blur-md animate-pulse"></div>
         {/if}
         <button 
-          class="relative group px-8 py-3.5 rounded-2xl font-extrabold text-sm transition-all duration-300 overflow-hidden flex items-center gap-2.5 shadow-lg
+          class="relative group px-6 py-3 rounded-xl font-extrabold text-sm transition-colors duration-160 overflow-hidden flex items-center gap-2.5 shadow-lg
             {snapshot?.focusMode 
-              ? 'bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-red-500/15 hover:shadow-red-500/25 hover:scale-[1.03] active:scale-[0.98]' 
-              : 'bg-gradient-to-r from-teal-400 to-emerald-500 text-slate-950 shadow-teal-500/15 hover:shadow-teal-500/25 hover:scale-[1.03] active:scale-[0.98]'}" 
+              ? 'bg-red-500 text-white shadow-red-500/15 hover:bg-red-400 active:scale-[0.98]'
+              : 'bg-teal-300 text-slate-950 shadow-teal-500/15 hover:bg-teal-200 active:scale-[0.98]'}"
           type="button" 
           onclick={toggleFocus}
         >
