@@ -115,6 +115,7 @@ fn spawn_monitoring(app_handle: tauri::AppHandle) {
 
             let today_seconds = state.storage().today_seconds().unwrap_or_default();
 
+            let _ = app_handle.emit("network_speed_update", &speed);
             let _ = app_handle.emit("update_active_app", &active_app);
             let _ = app_handle.emit(
                 "usage_update",

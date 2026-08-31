@@ -256,6 +256,24 @@ import { open } from "@tauri-apps/plugin-dialog";
       .then((unlisten) => unlisteners.push(unlisten))
       .catch(() => undefined);
 
+    void listen<{ uploadBps: number; downloadBps: number }>(
+      "network_speed_update",
+      (event) => {
+        if (snapshot) {
+          snapshot = {
+            ...snapshot,
+            networkSpeed: {
+              uploadBps: event.payload.uploadBps,
+              downloadBps: event.payload.downloadBps,
+            },
+          };
+        }
+        pushLiveNetworkSample(event.payload.downloadBps, event.payload.uploadBps);
+      },
+    )
+      .then((unlisten) => unlisteners.push(unlisten))
+      .catch(() => undefined);
+
     void listen<AppSnapshot["activeApp"]>("update_active_app", (event) => {
       if (snapshot) snapshot = { ...snapshot, activeApp: event.payload };
     })
@@ -419,6 +437,36 @@ import { open } from "@tauri-apps/plugin-dialog";
     await loadDetailUsage("today");
   }
 
+  let smoothedDownMbps = 0;
+  let smoothedUpMbps = 0;
+
+  function pushLiveNetworkSample(downloadBps: number, uploadBps: number) {
+    const rawDownMbps = (Math.max(0, downloadBps) * 8) / 1_000_000;
+    const rawUpMbps = (Math.max(0, uploadBps) * 8) / 1_000_000;
+
+    smoothedDownMbps = smoothedDownMbps === 0 && rawDownMbps > 0
+      ? rawDownMbps
+      : (smoothedDownMbps * 0.4 + rawDownMbps * 0.6);
+    smoothedUpMbps = smoothedUpMbps === 0 && rawUpMbps > 0
+      ? rawUpMbps
+      : (smoothedUpMbps * 0.4 + rawUpMbps * 0.6);
+
+    const nowTime = new Date().toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+    liveNetworkSamples = [
+      ...liveNetworkSamples,
+      {
+        time: nowTime,
+        down: Number(smoothedDownMbps.toFixed(2)),
+        up: Number(smoothedUpMbps.toFixed(2)),
+      },
+    ].slice(-60);
+  }
+
   async function refreshLiveState() {
     await Promise.all([
       loadSnapshot(),
@@ -427,18 +475,6 @@ import { open } from "@tauri-apps/plugin-dialog";
     ]).catch((error) => {
       showToast(toErrorMessage(error), "error");
     });
-
-    const nowTime = new Date().toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-    const downloadMb = (snapshot?.networkSpeed.downloadBps ?? 0) / 1_048_576;
-    const uploadMb = (snapshot?.networkSpeed.uploadBps ?? 0) / 1_048_576;
-    liveNetworkSamples = [
-      ...liveNetworkSamples,
-      { time: nowTime, down: downloadMb, up: uploadMb },
-    ].slice(-60);
   }
 
   // Toggles and Actions

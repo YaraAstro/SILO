@@ -46,10 +46,12 @@
   let canvas = $state<HTMLCanvasElement | null>(null);
   let chart: Chart | null = null;
   let mounted = false;
+  let currentType: ChartType | null = null;
 
   function renderChart() {
     if (!canvas || !mounted) return;
     chart?.destroy();
+    currentType = type;
     chart = new Chart(canvas, {
       type,
       data: { labels, datasets },
@@ -57,6 +59,7 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
+        resizeDelay: 60,
         interaction: { intersect: false, mode: "index" },
         plugins: {
           legend: {
@@ -93,17 +96,23 @@
   onMount(() => {
     mounted = true;
     renderChart();
-    return () => chart?.destroy();
+    return () => {
+      chart?.destroy();
+      chart = null;
+    };
   });
 
   $effect(() => {
-    labels;
-    datasets;
-    type;
-    renderChart();
+    if (chart && currentType === type) {
+      chart.data.labels = labels;
+      chart.data.datasets = datasets;
+      chart.update('none');
+    } else {
+      renderChart();
+    }
   });
 </script>
 
-<div style={`height: ${height}px`}>
+<div class="relative w-full overflow-hidden" style={`height: ${height}px`}>
   <canvas bind:this={canvas}></canvas>
 </div>

@@ -266,6 +266,14 @@
     return `${formatBytes(bytes)}/s`;
   }
 
+  function formatSpeedRate(bytes: number) {
+    const bits = Math.max(0, bytes) * 8;
+    if (bits >= 1_000_000_000) return `${(bits / 1_000_000_000).toFixed(2)} Gbps`;
+    if (bits >= 1_000_000) return `${(bits / 1_000_000).toFixed(2)} Mbps`;
+    if (bits >= 1000) return `${(bits / 1000).toFixed(1)} Kbps`;
+    return `${Math.round(bits)} bps`;
+  }
+
   function formatDateLabel(date: string) {
     return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
       new Date(`${date}T00:00:00`),
@@ -295,7 +303,7 @@
   function liveChartData() {
     return [
       {
-        label: "Download (MB/s)",
+        label: "Download (Mbps)",
         data: liveNetworkSamples.map((s: { time: string; down: number; up: number }) => s.down),
         backgroundColor: "rgba(20, 184, 166, 0.15)",
         borderColor: "#2dd4bf",
@@ -305,7 +313,7 @@
         pointRadius: 0,
       },
       {
-        label: "Upload (MB/s)",
+        label: "Upload (Mbps)",
         data: liveNetworkSamples.map((s: { time: string; down: number; up: number }) => s.up),
         backgroundColor: "rgba(139, 92, 246, 0.15)",
         borderColor: "#a78bfa",
@@ -592,30 +600,34 @@
           </span>
         </div>
         
-        <div class="grid grid-cols-2 gap-4 mb-10">
-          <div>
-            <div class="flex items-center gap-1.5 text-xs font-semibold text-teal-400/90 mb-1.5">
-              <Download size={13} strokeWidth={3} /> Download
+        {#if true}
+          {@const downRate = formatSpeedRate(snapshot?.networkSpeed?.downloadBps ?? 0)}
+          {@const upRate = formatSpeedRate(snapshot?.networkSpeed?.uploadBps ?? 0)}
+          <div class="grid grid-cols-2 gap-4 mb-10">
+            <div>
+              <div class="flex items-center gap-1.5 text-xs font-semibold text-teal-400/90 mb-1.5">
+                <Download size={13} strokeWidth={3} /> Download
+              </div>
+              <div class="text-[28px] leading-none font-black text-slate-100 font-mono tracking-tight flex items-baseline gap-1.5">
+                {downRate.split(' ')[0]} <span class="text-base font-bold text-teal-400/90">{downRate.split(' ')[1] || 'bps'}</span>
+              </div>
+              <div class="text-[11px] font-medium text-slate-500/90 mt-2">
+                Today {formatBytes(dataUsage?.totalDownloadBytes ?? 0)}
+              </div>
             </div>
-            <div class="text-[28px] leading-none font-black text-slate-100 font-sans tracking-tight flex items-baseline gap-1.5">
-              {formatBps(snapshot?.networkSpeed?.downloadBps ?? 0).split(' ')[0]} <span class="text-base font-bold">{formatBps(snapshot?.networkSpeed?.downloadBps ?? 0).split(' ')[1] || 'B/s'}</span>
-            </div>
-            <div class="text-[11px] font-medium text-slate-500/90 mt-2">
-              Today {formatBytes(dataUsage?.totalDownloadBytes ?? 0)}
+            <div>
+              <div class="flex items-center gap-1.5 text-xs font-semibold text-purple-400/90 mb-1.5">
+                <Upload size={13} strokeWidth={3} /> Upload
+              </div>
+              <div class="text-[28px] leading-none font-black text-slate-100 font-mono tracking-tight flex items-baseline gap-1.5">
+                {upRate.split(' ')[0]} <span class="text-base font-bold text-purple-400/90">{upRate.split(' ')[1] || 'bps'}</span>
+              </div>
+              <div class="text-[11px] font-medium text-slate-500/90 mt-2">
+                Today {formatBytes(dataUsage?.totalUploadBytes ?? 0)}
+              </div>
             </div>
           </div>
-          <div>
-            <div class="flex items-center gap-1.5 text-xs font-semibold text-purple-400/90 mb-1.5">
-              <Upload size={13} strokeWidth={3} /> Upload
-            </div>
-            <div class="text-[28px] leading-none font-black text-slate-100 font-sans tracking-tight flex items-baseline gap-1.5">
-              {formatBps(snapshot?.networkSpeed?.uploadBps ?? 0).split(' ')[0]} <span class="text-base font-bold">{formatBps(snapshot?.networkSpeed?.uploadBps ?? 0).split(' ')[1] || 'B/s'}</span>
-            </div>
-            <div class="text-[11px] font-medium text-slate-500/90 mt-2">
-              Today {formatBytes(dataUsage?.totalUploadBytes ?? 0)}
-            </div>
-          </div>
-        </div>
+        {/if}
       </div>
       
       <div class="mt-auto">
@@ -641,9 +653,9 @@
           <div class="flex items-center justify-between text-[11px] font-medium text-slate-500/80 mt-4 px-0.5">
             <span class="flex items-center gap-1.5">
               <Activity size={12} strokeWidth={2.5} class="text-slate-500/70" /> 
-              Last {Math.min(35, Math.max(1, recentSamples.length)) * 5}s
+              Last {Math.min(35, Math.max(1, recentSamples.length))}s
             </span>
-            <span>Peak {maxSpd > 0.01 ? maxSpd.toFixed(1) : "0.0"} MB/s</span>
+            <span>Peak {maxSpd > 0.01 ? maxSpd.toFixed(1) : "0.0"} Mbps</span>
           </div>
         {/if}
       </div>

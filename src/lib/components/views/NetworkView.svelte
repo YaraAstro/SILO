@@ -64,6 +64,14 @@
     return `${formatBytes(bytes)}/s`;
   }
 
+  function formatSpeedRate(bytes: number) {
+    const bits = Math.max(0, bytes) * 8;
+    if (bits >= 1_000_000_000) return `${(bits / 1_000_000_000).toFixed(2)} Gbps`;
+    if (bits >= 1_000_000) return `${(bits / 1_000_000).toFixed(2)} Mbps`;
+    if (bits >= 1000) return `${(bits / 1000).toFixed(1)} Kbps`;
+    return `${Math.round(bits)} bps`;
+  }
+
   function formatDateLabel(date: string) {
     return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
       new Date(`${date}T00:00:00`),
@@ -76,10 +84,10 @@
 
   function liveChartLabels() {
     const totalSamples = liveNetworkSamples.length;
-    const interval = settings?.sampleIntervalSeconds ?? 5;
+    const interval = 1;
 
     return liveNetworkSamples.map((sample: any, i: number) => {
-      const secondsAgo = (totalSamples - 1 - i) * interval;
+      const secondsAgo = totalSamples - 1 - i;
       if (secondsAgo === 0) return "Now";
       if (secondsAgo < 60) return `-${secondsAgo}s`;
       
@@ -92,7 +100,7 @@
   function liveChartData() {
     return [
       {
-        label: "Download (MB/s)",
+        label: "Download (Mbps)",
         data: liveNetworkSamples.map((s: { time: string; down: number; up: number }) => s.down),
         backgroundColor: "rgba(20, 184, 166, 0.15)",
         borderColor: "#2dd4bf",
@@ -102,7 +110,7 @@
         pointRadius: 0,
       },
       {
-        label: "Upload (MB/s)",
+        label: "Upload (Mbps)",
         data: liveNetworkSamples.map((s: { time: string; down: number; up: number }) => s.up),
         backgroundColor: "rgba(139, 92, 246, 0.15)",
         borderColor: "#a78bfa",
@@ -177,15 +185,15 @@
       <span class="flex items-center gap-2">
         <span class="h-2 w-2 rounded-full bg-emerald-400"></span> Live network speed
       </span>
-      <span>Sample interval: {settings?.sampleIntervalSeconds ?? 5}s</span>
+      <span>1s Realtime Stream</span>
     </div>
     <div class="mt-8 grid gap-8 md:grid-cols-2">
       <div>
         <p class="flex items-center gap-2 text-sm text-slate-500">
           <Download size={16} /> Download
         </p>
-        <p class="mt-2 text-5xl font-black text-teal-350">
-          {formatBps(snapshot?.networkSpeed?.downloadBps ?? 0)}
+        <p class="mt-2 text-5xl font-black text-teal-350 font-mono tracking-tight">
+          {formatSpeedRate(snapshot?.networkSpeed?.downloadBps ?? 0)}
         </p>
         <p class="mt-2 text-sm text-slate-500">
           Today: {formatBytes(dataUsage?.totalDownloadBytes ?? 0)}
@@ -195,8 +203,8 @@
         <p class="flex items-center gap-2 text-sm text-slate-500">
           <Upload size={16} /> Upload
         </p>
-        <p class="mt-2 text-5xl font-black text-violet-400">
-          {formatBps(snapshot?.networkSpeed?.uploadBps ?? 0)}
+        <p class="mt-2 text-5xl font-black text-violet-400 font-mono tracking-tight">
+          {formatSpeedRate(snapshot?.networkSpeed?.uploadBps ?? 0)}
         </p>
         <p class="mt-2 text-sm text-slate-500">
           Today: {formatBytes(dataUsage?.totalUploadBytes ?? 0)}
