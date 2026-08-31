@@ -42,3 +42,5 @@ uuid = { version = "1", features = ["v4"] }
 urlencoding = "2.1.3"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
+minisign = "0.9.1"
+
