@@ -805,16 +805,44 @@ fn close_overlay(app_handle: tauri::AppHandle) {
 
 // Toast logic removed due to Windows limitation with protocol input
 
+pub fn show_or_create_main_window(
+    app: &tauri::AppHandle,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error>> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        Ok(window)
+    } else {
+        let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+            .title("SILO")
+            .inner_size(1180.0, 760.0)
+            .min_inner_size(960.0, 640.0)
+            .build()?;
+        let _ = window.show();
+        let _ = window.set_focus();
+        Ok(window)
+    }
+}
+
+fn is_background_launch(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        let a = arg.trim_matches('"').to_lowercase();
+        a == "--minimized"
+            || a == "--background"
+            || a == "--autostart"
+            || a == "--silent"
+            || a == "-b"
+            || a == "/minimized"
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let args: Vec<String> = std::env::args().collect();
-    let _ = std::fs::write("d:\\Devs\\project_silo\\attempt_VI\\silo\\silo\\startup_args.txt", format!("{:?}", args));
-    
     tracing_subscriber::fmt().with_target(false).init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let _ = std::fs::write("d:\\Devs\\project_silo\\attempt_VI\\silo\\silo\\args.txt", format!("{:?}", argv));
             let mut skip_show = false;
             if let Some(arg) = argv.get(1) {
                 let arg_clean = arg.trim_matches('"');
@@ -837,10 +865,7 @@ pub fn run() {
                 }
             }
             if !skip_show {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                let _ = show_or_create_main_window(app);
             }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -883,6 +908,11 @@ pub fn run() {
             app.manage(state);
             spawn_monitoring(app.handle().clone());
 
+            let args: Vec<String> = std::env::args().collect();
+            if !is_background_launch(&args) {
+                let _ = show_or_create_main_window(app.handle());
+            }
+
             let show_i = MenuItemBuilder::with_id("show", "Show SILO").build(app)?;
             let add_rule_i = MenuItemBuilder::with_id("add_rule", "Add Rule").build(app)?;
             let app_state = app.state::<AppState>();
@@ -914,16 +944,11 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        let _ = show_or_create_main_window(app);
                     }
                     "add_rule" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = app.emit("navigate", "rules");
+                        if let Ok(window) = show_or_create_main_window(app) {
+                            let _ = window.emit("navigate", "rules");
                         }
                     }
                     "toggle_focus" => {
@@ -932,11 +957,8 @@ pub fn run() {
                         
                         if !enabled {
                             // Turn OFF requires PIN
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                                let _ = app.emit("request_pin_unlock", ());
-                            }
+                            let _ = show_or_create_main_window(app);
+                            let _ = app.emit("request_pin_unlock", ());
                         } else {
                             // Turn ON is direct
                             app_state.set_focus_mode(true);
@@ -948,11 +970,8 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = app.emit("request_quit_pin_unlock", ());
-                        }
+                        let _ = show_or_create_main_window(app);
+                        let _ = app.emit("request_quit_pin_unlock", ());
                     }
                     _ => {}
                 })
@@ -968,9 +987,12 @@ pub fn run() {
                             if let Ok(true) = window.is_visible() {
                                 let _ = window.hide();
                             } else {
+                                let _ = window.unminimize();
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
+                        } else {
+                            let _ = show_or_create_main_window(app);
                         }
                     }
                 })
